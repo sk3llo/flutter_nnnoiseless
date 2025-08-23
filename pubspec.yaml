@@ -1,0 +1,34 @@
+name: flutter_nnnoiseless
+description: "Port of the original [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project to Flutter."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.6.0
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_rust_bridge: 2.11.1
+  cupertino_icons: ^1.0.8
+  path_provider: ^2.1.5
+  rust_lib_flutter_nnnoiseless:
+    path: rust_builder
+  record: ^6.1.1
+  path: ^1.9.1
+  wav: ^1.5.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.0
+  ffigen: 19.0.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/

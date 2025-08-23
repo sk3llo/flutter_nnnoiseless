@@ -3,7 +3,7 @@ description: "Port of the original [nnnoiseless](https://github.com/jneem/nnnois
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.6.0
+  sdk: ^3.7.2
 dependencies:
   flutter:
     sdk: flutter

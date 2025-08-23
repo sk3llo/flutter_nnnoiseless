@@ -5,11 +5,11 @@
 cmake_minimum_required(VERSION 3.14)
 
 # Project-level configuration.
-set(PROJECT_NAME "rust_lib_flutter_nnnoiseless")
+set(PROJECT_NAME "flutter_nnnoiseless")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
 include("../cargokit/cmake/cargokit.cmake")
-apply_cargokit(${PROJECT_NAME} ../../../../../../rust rust_lib_flutter_nnnoiseless "")
+apply_cargokit(${PROJECT_NAME} ../rust rust_lib_flutter_nnnoiseless "")
 
 # List of absolute paths to libraries that should be bundled with the plugin.
 # This list could contain prebuilt libraries, or libraries created by an

@@ -12,6 +12,13 @@ _Port of the [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project to
 </p>
 </div>
 
+## Requirements
+
+- `Flutter 3.0.0` or higher
+- `iOS 11.0` or higher
+- `macOS 10.15` or higher
+- `Android SDK 23` or higher
+
 ## Setup
 
 No need to setup anything - the package is self-contained and all the [Rust](https://www.rust-lang.org/) bindings are already baked in.
@@ -37,10 +44,3 @@ stream.listen((input) async {
   final result = await noiseless.denoiseChunk(input: input);
 });
 ```
-
-## Requirements
-
-- `Flutter 3.0.0` or higher
-- `iOS 11.0` or higher
-- `macOS 10.15` or higher
-- `Android SDK 23` or higher

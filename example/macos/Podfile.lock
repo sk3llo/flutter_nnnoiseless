@@ -1,0 +1,41 @@
+PODS:
+  - flutter_nnnoiseless (0.0.1):
+    - FlutterMacOS
+  - FlutterMacOS (1.0.0)
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - record_macos (1.1.0):
+    - FlutterMacOS
+  - rust_lib_flutter_nnnoiseless (0.0.1):
+    - FlutterMacOS
+
+DEPENDENCIES:
+  - flutter_nnnoiseless (from `Flutter/ephemeral/.symlinks/plugins/flutter_nnnoiseless/macos`)
+  - FlutterMacOS (from `Flutter/ephemeral`)
+  - path_provider_foundation (from `Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin`)
+  - record_macos (from `Flutter/ephemeral/.symlinks/plugins/record_macos/macos`)
+  - rust_lib_flutter_nnnoiseless (from `Flutter/ephemeral/.symlinks/plugins/rust_lib_flutter_nnnoiseless/macos`)
+
+EXTERNAL SOURCES:
+  flutter_nnnoiseless:
+    :path: Flutter/ephemeral/.symlinks/plugins/flutter_nnnoiseless/macos
+  FlutterMacOS:
+    :path: Flutter/ephemeral
+  path_provider_foundation:
+    :path: Flutter/ephemeral/.symlinks/plugins/path_provider_foundation/darwin
+  record_macos:
+    :path: Flutter/ephemeral/.symlinks/plugins/record_macos/macos
+  rust_lib_flutter_nnnoiseless:
+    :path: Flutter/ephemeral/.symlinks/plugins/rust_lib_flutter_nnnoiseless/macos
+
+SPEC CHECKSUMS:
+  flutter_nnnoiseless: 92168d1960ad4af5a8cd46afe7e84639d3f7a848
+  FlutterMacOS: 8f6f14fa908a6fb3fba0cd85dbd81ec4b251fb24
+  path_provider_foundation: 2b6b4c569c0fb62ec74538f866245ac84301af46
+  record_macos: 4440ca269ad3b870ebb1965297a365d558f0c520
+  rust_lib_flutter_nnnoiseless: 270dd815511542d080c97a648d0882aff52d54e5
+
+PODFILE CHECKSUM: 54d867c82ac51cbd61b565781b9fada492027009
+
+COCOAPODS: 1.16.2

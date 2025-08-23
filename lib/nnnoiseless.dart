@@ -7,7 +7,7 @@ abstract class Noiseless {
 
   static final Noiseless instance = _NoiselessImpl();
 
-  Future<Uint8List> denoiseFile({
+  Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
   });
@@ -36,11 +36,9 @@ class _NoiselessImpl extends Noiseless {
   }
 
   @override
-  Future<Uint8List> denoiseFile({required String inputPathStr, required String outputPathStr}) async {
+  Future<void> denoiseFile({required String inputPathStr, required String outputPathStr}) async {
     if (!_initialized) await init();
-    /// TODO: finish file denoising
-    // return await denoise(inputPathStr: inputPathStr, outputPathStr: outputPathStr);
-    return Uint8List(0);
+    return denoise(inputPathStr: inputPathStr, outputPathStr: outputPathStr);
   }
 
   @override

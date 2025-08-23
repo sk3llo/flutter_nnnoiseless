@@ -3,6 +3,8 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'dart:io';
+
 import 'api/nnnoiseless.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -35,12 +37,8 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
   /// Initialize flutter_rust_bridge in mock mode.
   /// No libraries for FFI are loaded.
-  static void initMock({
-    required RustLibApi api,
-  }) {
-    instance.initMockImpl(
-      api: api,
-    );
+  static void initMock({required RustLibApi api}) {
+    instance.initMockImpl(api: api);
   }
 
   /// Dispose flutter_rust_bridge
@@ -68,22 +66,26 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => -1591872690;
+  int get rustContentHash => 832027299;
 
-  static const kDefaultExternalLibraryLoaderConfig =
+  static final kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-    stem: 'rust_lib_flutter_nnnoiseless',
-    ioDirectory: 'rust/target/release/',
-    webPrefix: 'pkg/',
-  );
+        stem: Platform.isAndroid ? 'rust_lib_flutter_nnnoiseless' : 'flutter_nnnoiseless',
+        ioDirectory: 'rust/target/release/',
+        webPrefix: 'pkg/',
+      );
 }
 
 abstract class RustLibApi extends BaseApi {
-  Future<void> crateApiNnnoiselessDenoise(
-      {required String inputPathStr, required String outputPathStr});
+  Future<void> crateApiNnnoiselessDenoise({
+    required String inputPathStr,
+    required String outputPathStr,
+  });
 
-  Future<Uint8List> crateApiNnnoiselessDenoiseRealtime(
-      {required List<int> input, required int inputSampleRate});
+  Future<Uint8List> crateApiNnnoiselessDenoiseChunk({
+    required List<int> input,
+    required int inputSampleRate,
+  });
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -95,55 +97,71 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
-  Future<void> crateApiNnnoiselessDenoise(
-      {required String inputPathStr, required String outputPathStr}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(inputPathStr, serializer);
-        sse_encode_String(outputPathStr, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 1, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNnnoiselessDenoise({
+    required String inputPathStr,
+    required String outputPathStr,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(inputPathStr, serializer);
+          sse_encode_String(outputPathStr, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNnnoiselessDenoiseConstMeta,
+        argValues: [inputPathStr, outputPathStr],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNnnoiselessDenoiseConstMeta,
-      argValues: [inputPathStr, outputPathStr],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNnnoiselessDenoiseConstMeta => const TaskConstMeta(
-        debugName: "denoise",
-        argNames: ["inputPathStr", "outputPathStr"],
-      );
+    debugName: "denoise",
+    argNames: ["inputPathStr", "outputPathStr"],
+  );
 
   @override
-  Future<Uint8List> crateApiNnnoiselessDenoiseRealtime(
-      {required List<int> input, required int inputSampleRate}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_list_prim_u_8_loose(input, serializer);
-        sse_encode_u_32(inputSampleRate, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 2, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_prim_u_8_strict,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<Uint8List> crateApiNnnoiselessDenoiseChunk({
+    required List<int> input,
+    required int inputSampleRate,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_list_prim_u_8_loose(input, serializer);
+          sse_encode_u_32(inputSampleRate, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNnnoiselessDenoiseChunkConstMeta,
+        argValues: [input, inputSampleRate],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNnnoiselessDenoiseRealtimeConstMeta,
-      argValues: [input, inputSampleRate],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiNnnoiselessDenoiseRealtimeConstMeta =>
+  TaskConstMeta get kCrateApiNnnoiselessDenoiseChunkConstMeta =>
       const TaskConstMeta(
-        debugName: "denoise_realtime",
+        debugName: "denoise_chunk",
         argNames: ["input", "inputSampleRate"],
       );
 
@@ -248,7 +266,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_AnyhowException(
-      AnyhowException self, SseSerializer serializer) {
+    AnyhowException self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.message, serializer);
   }
@@ -261,16 +281,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_list_prim_u_8_loose(
-      List<int> self, SseSerializer serializer) {
+    List<int> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
-    serializer.buffer
-        .putUint8List(self is Uint8List ? self : Uint8List.fromList(self));
+    serializer.buffer.putUint8List(
+      self is Uint8List ? self : Uint8List.fromList(self),
+    );
   }
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-      Uint8List self, SseSerializer serializer) {
+    Uint8List self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);

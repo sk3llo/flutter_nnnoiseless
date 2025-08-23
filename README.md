@@ -1,39 +1,46 @@
-### Flutter NNNoiseless
+<div align="center">
 
-Port of the [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project to Flutter. Based on Recurrent neural network for audio noise reduction and connected to Flutter using [Flutter Rust Bridge](https://pub.dev/packages/flutter_rust_bridge).
+# Flutter NNNoiseless
+
+_Port of the [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project to Flutter. Based on Recurrent neural network for audio noise reduction and connected to Flutter using [Flutter Rust Bridge](https://pub.dev/packages/flutter_rust_bridge)._
+
+<p align="center">
+  <a href="https://pub.dev/packages/flutter_nnnoiseless">
+     <img src="https://img.shields.io/badge/pub-1.0.0-blue?logo=dart" alt="pub">
+  </a>
+  <a href="https://buymeacoffee.com/sk3llo" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="21" width="114"></a>
+</p>
+</div>
+
+## Setup
+
+No need to setup anything - the package is self-contained and all the [Rust](https://www.rust-lang.org/) bindings are already baked in.
 
 ## Getting started
 
-1. Generate rust bridge bindings:
+1. Create `noiseless` instance:
 
-```
-flutter_rust_bridge_codegen integrate
-```
-
-2. Create an instance of the NNNoiseless class:
-
-```
-final nnnoiseless = Noiseless.instance;
+```dart
+final noiseless = Noiseless.instance;
 ```
 
-## Usage
+2. Use it to denoise an audio file:
 
-Use the instance to reduce noise in an audio file:
-
-```
-await nnnoiseless.denoise(inputPathStr: 'assets/noise.wav', outputPathStr: 'assets/output.wav');
+```dart
+await noiseless.denoiseFile(inputPathStr: 'assets/noise.wav', outputPathStr: 'assets/output.wav');
 ```
 
-Or in real-time Flutter audio input via a `Stream`:
+3. Or in real-time Flutter audio input via a `Stream`:
 
-```
+```dart
 stream.listen((input) async {
-  final result = await Noiseless.instance.denoiseRealtime(input: input);
+  final result = await noiseless.denoiseChunk(input: input);
 });
 ```
 
 ## Requirements
 
 - `Flutter 3.0.0` or higher
-- `osx 10.15` or higher
-- `rust_flutter_bridge 2.0.0` or higher
+- `iOS 11.0` or higher
+- `macOS 10.15` or higher
+- `Android SDK 23` or higher

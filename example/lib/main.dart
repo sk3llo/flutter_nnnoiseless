@@ -8,7 +8,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 Future<void> main() async {
-  // await RustLib.init();
   runApp(const MyApp());
 }
 
@@ -21,6 +20,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   final record = AudioRecorder();
+  final noiseless = Noiseless.instance;
   bool _isRecording = false;
   String _tempDir = '';
 
@@ -70,7 +70,7 @@ class _MyAppState extends State<MyApp> {
       if (!(await File(noiseWavPath).exists())) {
         await File(noiseWavPath).writeAsBytes(byteData.buffer.asUint8List());
       }
-      await Noiseless.instance.denoiseFile(inputPathStr: noiseWavPath, outputPathStr: outputPath);
+      await noiseless.denoiseFile(inputPathStr: noiseWavPath, outputPathStr: outputPath);
       debugPrint('Successfully denoised to: $outputPath');
     } catch (e) {
       debugPrint(e.toString());
@@ -104,7 +104,7 @@ class _MyAppState extends State<MyApp> {
 
         final sub = stream.listen((event) async {
           /// Realtime chunk denoising
-          final result = await Noiseless.instance.denoiseInRealtime(input: event);
+          final result = await noiseless.denoiseInRealtime(input: event);
 
           try {
             /// Save raw audio for comparison
@@ -120,8 +120,8 @@ class _MyAppState extends State<MyApp> {
           final finishedFile = await file.close();
 
           /// Convert to wav
-          await Noiseless.instance.pcmToWav(pcmData: finishedRawFile.readAsBytesSync(), outputPath: outputRawPath);
-          await Noiseless.instance.pcmToWav(pcmData: finishedFile.readAsBytesSync(), outputPath: outputPath);
+          await noiseless.pcmToWav(pcmData: finishedRawFile.readAsBytesSync(), outputPath: outputRawPath);
+          await noiseless.pcmToWav(pcmData: finishedFile.readAsBytesSync(), outputPath: outputPath);
 
           debugPrint('Successfully saved audio to:\n$_tempDir');
         });

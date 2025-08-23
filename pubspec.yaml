@@ -8,8 +8,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_rust_bridge: 2.11.1
-  rust_lib_flutter_nnnoiseless:
-    path: rust_builder
+#  rust_lib_flutter_nnnoiseless:
+#    path: rust_builder
   path: ^1.9.1
   wav: ^1.5.0
 

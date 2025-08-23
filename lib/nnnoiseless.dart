@@ -47,7 +47,7 @@ class _NoiselessImpl extends Noiseless {
     int inputSampleRate = 48000,
   }) async {
     if (!_initialized) await init();
-    return await denoiseRealtime(input: input, inputSampleRate: inputSampleRate);
+    return await denoiseChunk(input: input, inputSampleRate: inputSampleRate);
   }
 
   /// Converts a raw 16-bit PCM audio buffer to a WAV file.

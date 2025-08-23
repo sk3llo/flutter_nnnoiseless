@@ -19,12 +19,18 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 ///
 /// # Returns
 /// A `Result` containing the denoised audio chunk as a `Vec<u8>`.
-Future<Uint8List> denoiseRealtime(
-        {required List<int> input, required int inputSampleRate}) =>
-    RustLib.instance.api.crateApiNnnoiselessDenoiseRealtime(
-        input: input, inputSampleRate: inputSampleRate);
+Future<Uint8List> denoiseChunk({
+  required List<int> input,
+  required int inputSampleRate,
+}) => RustLib.instance.api.crateApiNnnoiselessDenoiseChunk(
+  input: input,
+  inputSampleRate: inputSampleRate,
+);
 
-Future<void> denoise(
-        {required String inputPathStr, required String outputPathStr}) =>
-    RustLib.instance.api.crateApiNnnoiselessDenoise(
-        inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+Future<void> denoise({
+  required String inputPathStr,
+  required String outputPathStr,
+}) => RustLib.instance.api.crateApiNnnoiselessDenoise(
+  inputPathStr: inputPathStr,
+  outputPathStr: outputPathStr,
+);

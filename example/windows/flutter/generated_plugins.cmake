@@ -8,7 +8,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
   flutter_nnnoiseless
-  rust_lib_flutter_nnnoiseless
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

@@ -37,7 +37,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.11.1";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 944241175;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1591872690;
 
 // Section: executor
 
@@ -45,7 +45,7 @@ flutter_rust_bridge::frb_generated_default_handler!();
 
 // Section: wire_funcs
 
-fn wire__crate__api__simple__denoise_impl(
+fn wire__crate__api__nnnoiseless__denoise_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -73,8 +73,10 @@ fn wire__crate__api__simple__denoise_impl(
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
-                        let output_ok =
-                            crate::api::simple::denoise(&api_input_path_str, &api_output_path_str)?;
+                        let output_ok = crate::api::nnnoiseless::denoise(
+                            &api_input_path_str,
+                            &api_output_path_str,
+                        )?;
                         Ok(output_ok)
                     })(),
                 )
@@ -82,7 +84,7 @@ fn wire__crate__api__simple__denoise_impl(
         },
     )
 }
-fn wire__crate__api__simple__denoise_realtime_impl(
+fn wire__crate__api__nnnoiseless__denoise_realtime_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -105,11 +107,15 @@ fn wire__crate__api__simple__denoise_realtime_impl(
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_input = <Vec<u8>>::sse_decode(&mut deserializer);
+            let api_input_sample_rate = <u32>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || {
-                        let output_ok = crate::api::simple::denoise_realtime(api_input)?;
+                        let output_ok = crate::api::nnnoiseless::denoise_realtime(
+                            api_input,
+                            api_input_sample_rate,
+                        )?;
                         Ok(output_ok)
                     })(),
                 )
@@ -148,6 +154,13 @@ impl SseDecode for Vec<u8> {
     }
 }
 
+impl SseDecode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_u32::<NativeEndian>().unwrap()
+    }
+}
+
 impl SseDecode for u8 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -183,8 +196,10 @@ fn pde_ffi_dispatcher_primary_impl(
 ) {
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
-        1 => wire__crate__api__simple__denoise_impl(port, ptr, rust_vec_len, data_len),
-        2 => wire__crate__api__simple__denoise_realtime_impl(port, ptr, rust_vec_len, data_len),
+        1 => wire__crate__api__nnnoiseless__denoise_impl(port, ptr, rust_vec_len, data_len),
+        2 => {
+            wire__crate__api__nnnoiseless__denoise_realtime_impl(port, ptr, rust_vec_len, data_len)
+        }
         _ => unreachable!(),
     }
 }
@@ -224,6 +239,13 @@ impl SseEncode for Vec<u8> {
         for item in self {
             <u8>::sse_encode(item, serializer);
         }
+    }
+}
+
+impl SseEncode for u32 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_u32::<NativeEndian>(self).unwrap();
     }
 }
 

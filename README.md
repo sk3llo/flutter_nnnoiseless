@@ -6,7 +6,7 @@ _Real-Time and Batch Audio Noise Reduction for Flutter. Port of the [nnnoiseless
 
 <p align="center">
   <a href="https://pub.dev/packages/flutter_nnnoiseless">
-     <img src="https://img.shields.io/badge/pub-1.0.0-blue?logo=dart" alt="pub">
+     <img src="https://img.shields.io/badge/pub-1.0.1-blue?logo=dart" alt="pub">
   </a>
   <a href="https://buymeacoffee.com/sk3llo" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="21" width="114"></a>
 </p>

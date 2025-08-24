@@ -1,7 +1,7 @@
 name: flutter_nnnoiseless
 description: "Recurrent neural network for audio noise reduction ."
 repository: https://github.com/sk3llo/flutter_nnnoiseless.git
-version: 1.0.0
+version: 1.0.1
 
 environment:
   sdk: ^3.7.2

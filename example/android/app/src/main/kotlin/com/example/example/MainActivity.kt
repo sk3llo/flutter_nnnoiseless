@@ -1,4 +1,4 @@
-package com.example.example
+package com.antonkarpenko.nnnoiseless
 
 import io.flutter.embedding.android.FlutterActivity
 

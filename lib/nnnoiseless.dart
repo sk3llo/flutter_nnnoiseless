@@ -4,7 +4,6 @@ import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
 import 'package:wav/wav_file.dart';
 
 abstract class Noiseless {
-
   static final Noiseless instance = _NoiselessImpl();
 
   Future<void> denoiseFile({
@@ -36,7 +35,10 @@ class _NoiselessImpl extends Noiseless {
   }
 
   @override
-  Future<void> denoiseFile({required String inputPathStr, required String outputPathStr}) async {
+  Future<void> denoiseFile({
+    required String inputPathStr,
+    required String outputPathStr,
+  }) async {
     if (!_initialized) await init();
     return denoise(inputPathStr: inputPathStr, outputPathStr: outputPathStr);
   }
@@ -68,14 +70,19 @@ class _NoiselessImpl extends Noiseless {
     final pcm16 = pcmData.buffer.asInt16List();
 
     // 2. De-interleave the PCM data and normalize to the [-1.0, 1.0] range for the package.
-    List<List<double>> tempChannels = List.generate(numChannels, (_) => <double>[]);
+    List<List<double>> tempChannels = List.generate(
+      numChannels,
+      (_) => <double>[],
+    );
     for (int i = 0; i < pcm16.length; i++) {
       final channel = i % numChannels;
       // Normalize by dividing by the max value of an i16.
       tempChannels[channel].add(pcm16[i] / 32767.0);
     }
 
-    final channels = tempChannels.map((channelData) => Float64List.fromList(channelData)).toList();
+    final channels = tempChannels
+        .map((channelData) => Float64List.fromList(channelData))
+        .toList();
 
     // 3. Create a Wav object with the audio data and specifications.
     final wav = Wav(channels, sampleRate);

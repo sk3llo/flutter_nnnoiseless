@@ -43,8 +43,14 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              MaterialButton(onPressed: _denoise, child: Text('Denoise audio file')),
-              MaterialButton(onPressed: _denoiseRealtime, child: Text('Denoise from mic')),
+              MaterialButton(
+                onPressed: _denoise,
+                child: Text('Denoise audio file'),
+              ),
+              MaterialButton(
+                onPressed: _denoiseRealtime,
+                child: Text('Denoise from mic'),
+              ),
               if (_isRecording)
                 MaterialButton(
                   onPressed: () async {
@@ -70,7 +76,10 @@ class _MyAppState extends State<MyApp> {
       if (!(await File(noiseWavPath).exists())) {
         await File(noiseWavPath).writeAsBytes(byteData.buffer.asUint8List());
       }
-      await noiseless.denoiseFile(inputPathStr: noiseWavPath, outputPathStr: outputPath);
+      await noiseless.denoiseFile(
+        inputPathStr: noiseWavPath,
+        outputPathStr: outputPath,
+      );
       debugPrint('Successfully denoised to: $outputPath');
     } catch (e) {
       debugPrint(e.toString());
@@ -83,9 +92,14 @@ class _MyAppState extends State<MyApp> {
         setState(() {
           _isRecording = true;
         });
+
         /// Start recording
         final stream = await record.startStream(
-          RecordConfig(encoder: AudioEncoder.pcm16bits, sampleRate: 48000, numChannels: 1),
+          RecordConfig(
+            encoder: AudioEncoder.pcm16bits,
+            sampleRate: 48000,
+            numChannels: 1,
+          ),
         );
         final outputPath = path.join(_tempDir, path.basename('output'));
         final outputRawPath = path.join(_tempDir, path.basename('output_raw'));
@@ -109,6 +123,7 @@ class _MyAppState extends State<MyApp> {
           try {
             /// Save raw audio for comparison
             rawFile.add(event);
+
             /// Save denoised audio
             file.add(result);
           } catch (_) {}
@@ -120,8 +135,14 @@ class _MyAppState extends State<MyApp> {
           final finishedFile = await file.close();
 
           /// Convert to wav
-          await noiseless.pcmToWav(pcmData: finishedRawFile.readAsBytesSync(), outputPath: outputRawPath);
-          await noiseless.pcmToWav(pcmData: finishedFile.readAsBytesSync(), outputPath: outputPath);
+          await noiseless.pcmToWav(
+            pcmData: finishedRawFile.readAsBytesSync(),
+            outputPath: outputRawPath,
+          );
+          await noiseless.pcmToWav(
+            pcmData: finishedFile.readAsBytesSync(),
+            outputPath: outputPath,
+          );
 
           debugPrint('Successfully saved audio to:\n$_tempDir');
         });

@@ -1,20 +1,22 @@
-# The Flutter tooling requires that developers have a version of Visual Studio
-# installed that includes CMake 3.14 or later. You should not increase this
-# version, as doing so will cause the plugin to fail to compile for some
-# customers of the plugin.
 cmake_minimum_required(VERSION 3.14)
 
-# Project-level configuration.
+# Project-level configuration for the CMake part of the build.
 set(PROJECT_NAME "flutter_nnnoiseless")
 project(${PROJECT_NAME} LANGUAGES CXX)
 
+# Include the cargokit build script helper.
 include("../cargokit/cmake/cargokit.cmake")
-apply_cargokit(${PROJECT_NAME} ../rust rust_lib_flutter_nnnoiseless "")
 
-# List of absolute paths to libraries that should be bundled with the plugin.
-# This list could contain prebuilt libraries, or libraries created by an
-# external build triggered from this build file.
-set(rust_lib_flutter_nnnoiseless_bundled_libraries
-  "${${PROJECT_NAME}_cargokit_lib}"
-  PARENT_SCOPE
+# Use a conditional to prevent the target from being created more than once.
+if(NOT TARGET ${PROJECT_NAME}_cargokit)
+    # This command creates the library target.
+    # The first argument is the CMake target, the third is the Rust library name.
+    apply_cargokit(${PROJECT_NAME} ../rust rust_lib_flutter_nnnoiseless "")
+endif()
+
+# This variable is required by the Flutter tool. It tells it which library to
+# bundle with the app. We get the path from the cargokit script output.
+set(flutter_nnnoiseless_bundled_libraries
+        "${${PROJECT_NAME}_cargokit_lib}"
+        PARENT_SCOPE
 )

@@ -28,7 +28,7 @@ dev_dependencies:
 topics:
   - 'audio'
   - 'noise'
-  - 'RNN'
+  - 'recurrent-neural-network'
   - 'artificial-intelligence'
 
 flutter:

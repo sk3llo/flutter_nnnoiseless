@@ -1,6 +1,6 @@
 <div align="center">
 
-# Flutter NNNoiseless
+# Flutter NNNoiseless - Real-Time Audio Noise Reduction
 
 _Port of the [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project to Flutter. Based on Recurrent neural network for audio noise reduction and connected to Flutter using [Flutter Rust Bridge](https://pub.dev/packages/flutter_rust_bridge)._
 
@@ -21,7 +21,7 @@ _Port of the [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project to
 
 ## Setup
 
-No need to setup anything - the package is self-contained and all the [Rust](https://www.rust-lang.org/) bindings are already baked in.
+[Rust](https://www.rust-lang.org/learn/get-started) installation is required in order to generate necessary bindings.
 
 ## Getting started
 

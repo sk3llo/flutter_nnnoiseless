@@ -1,13 +1,14 @@
 name: flutter_nnnoiseless
-description: "Port of the original [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project to Flutter."
-version: 1.0.0+1
+description: "Recurrent neural network for audio noise reduction ."
+repository: https://github.com/sk3llo/flutter_nnnoiseless.git
+version: 1.0.0
 
 environment:
   sdk: ^3.7.2
 dependencies:
   flutter:
     sdk: flutter
-  flutter_rust_bridge: 2.11.1
+  flutter_rust_bridge: ^2.11.1
   path: ^1.9.1
   wav: ^1.5.0
 

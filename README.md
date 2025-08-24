@@ -2,7 +2,7 @@
 
 # Flutter NNNoiseless
 
-_Real-Time and Batch Audio Noise Reduction for Flutter. Port of the [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project, based on **RNN** (Recurrent neural network) and powered by [Flutter Rust Bridge](https://pub.dev/packages/flutter_rust_bridge)._
+_Real-Time and Batch Audio Noise Reduction for Flutter. Port of the [nnnoiseless](https://github.com/jneem/nnnoiseless) Rust project, based on Recurrent neural network and powered by [Flutter Rust Bridge](https://pub.dev/packages/flutter_rust_bridge)._
 
 <p align="center">
   <a href="https://pub.dev/packages/flutter_nnnoiseless">
@@ -11,6 +11,19 @@ _Real-Time and Batch Audio Noise Reduction for Flutter. Port of the [nnnoiseless
   <a href="https://buymeacoffee.com/sk3llo" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me A Coffee" height="21" width="114"></a>
 </p>
 </div>
+
+
+## Supported platforms
+
+
+| Platform  | Supported |
+|-----------|-----------|
+| Android   | ✅        |
+| iOS       | ✅        |
+| MacOS     | ✅        |
+| Windows   | ✅        |
+| Linux     | In progress       |
+
 
 ## Requirements
 
@@ -32,7 +45,7 @@ _Real-Time and Batch Audio Noise Reduction for Flutter. Port of the [nnnoiseless
 final noiseless = Noiseless.instance;
 ```
 
-2. Use it to denoise an audio file (only `.wav` files are supported):
+2. Use it to denoise an audio file:
 
 ```dart
 await noiseless.denoiseFile(inputPathStr: 'assets/noise.wav', outputPathStr: 'assets/output.wav');

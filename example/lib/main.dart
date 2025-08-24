@@ -118,7 +118,7 @@ class _MyAppState extends State<MyApp> {
 
         final sub = stream.listen((event) async {
           /// Realtime chunk denoising
-          final result = await noiseless.denoiseInRealtime(input: event);
+          final result = await noiseless.denoiseChunk(input: event);
 
           try {
             /// Save raw audio for comparison

@@ -58,3 +58,8 @@ stream.listen((input) async {
   final result = await noiseless.denoiseChunk(input: input);
 });
 ```
+
+
+Note:  
+*Doesn't changes introduced for 1.0.2 do not work when running in ebug*
+*Workaround: use `flutter run --release` on physical devices*

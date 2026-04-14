@@ -9,7 +9,7 @@ crate-type = ["cdylib", "staticlib"]
 [dependencies]
 anyhow = "1.0.99"
 dasp = { version = "0.11", features = ["interpolate", "ring_buffer", "signal"] }
-flutter_rust_bridge = "=2.11.1"
+flutter_rust_bridge = "=2.12.0"
 hound = "3.5.1"
 nnnoiseless = "0.5.1"
 once_cell = "1.21.3"

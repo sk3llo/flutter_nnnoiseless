@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  analyze-and-test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust checks
+        working-directory: rust
+        run: |
+          cargo clippy --release -- -D warnings
+          cargo build --release
+
+      - name: Flutter analyze
+        run: |
+          flutter pub get
+          flutter analyze
+
+      - name: Flutter tests (against host-built Rust library)
+        run: flutter test

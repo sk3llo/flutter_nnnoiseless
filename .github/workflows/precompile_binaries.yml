@@ -1,0 +1,79 @@
+name: precompile_binaries
+
+# Builds and signs the Rust library for every supported target and uploads
+# the binaries to a GitHub Release tagged `precompiled_<crate-hash>`.
+# Cargokit downloads and verifies these at build time, so plugin users
+# don't need a Rust toolchain installed (local builds remain the fallback).
+#
+# Run this whenever anything under rust/ changes, and always before
+# publishing a new version to pub.dev.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'rust/**'
+      - 'cargokit/**'
+      - '.github/workflows/precompile_binaries.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  precompile:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Android NDK
+        if: matrix.os == 'ubuntu-latest'
+        run: echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Install build tool dependencies
+        working-directory: cargokit/build_tool
+        run: dart pub get
+
+      - name: Precompile (Linux + Android)
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: cargokit/build_tool
+        run: >-
+          dart run build_tool precompile-binaries -v
+          --manifest-dir=../../rust
+          --repository=sk3llo/flutter_nnnoiseless
+          --android-sdk-location=$ANDROID_HOME
+          --android-ndk-version=27.2.12479018
+          --android-min-sdk-version=23
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+
+      - name: Precompile (macOS + iOS)
+        if: matrix.os == 'macos-latest'
+        working-directory: cargokit/build_tool
+        run: >-
+          dart run build_tool precompile-binaries -v
+          --manifest-dir=../../rust
+          --repository=sk3llo/flutter_nnnoiseless
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}
+
+      - name: Precompile (Windows)
+        if: matrix.os == 'windows-latest'
+        working-directory: cargokit/build_tool
+        run: >-
+          dart run build_tool precompile-binaries -v
+          --manifest-dir=../../rust
+          --repository=sk3llo/flutter_nnnoiseless
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PRIVATE_KEY: ${{ secrets.CARGOKIT_PRIVATE_KEY }}

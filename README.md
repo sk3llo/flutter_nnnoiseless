@@ -35,26 +35,58 @@ _Real-Time and Batch Audio Noise Reduction for Flutter. Port of the [nnnoiseless
 
 ## Setup
 
-[Rust](https://www.rust-lang.org/learn/get-started) installation is required in order to generate necessary bindings.
+No extra setup is needed in most cases: prebuilt, signed native libraries are
+downloaded automatically at build time. If a prebuilt binary isn't available
+for your platform, the build falls back to compiling from source, which
+requires a [Rust](https://www.rust-lang.org/learn/get-started) installation.
 
 ## Getting started
 
-1. Create `noiseless` instance:
+### Real-time denoising
+
+Create a `NoiselessSession` per audio stream. Each session owns its own
+denoiser state, so multiple sessions can run concurrently and nothing leaks
+between recordings:
 
 ```dart
-final noiseless = Noiseless.instance;
+final session = await NoiselessSession.create(sampleRate: 48000);
+
+// Pipe a raw 16-bit PCM mono stream (e.g. from the `record` package):
+micStream.transform(session.transformer).listen(playOrSave);
+
+// ...or process chunks yourself and read voice activity per chunk:
+final result = await session.process(chunk);
+save(result.audio);                     // denoised PCM at your sample rate
+if (result.isVoice()) showSpeakingIndicator();
+
+// At the end of a recording:
+final tail = await session.flush();     // drain buffered audio
+await session.reset();                  // reuse for the next recording...
+session.dispose();                      // ...or release it
 ```
 
-2. Use it to denoise an audio file:
+Sample rates other than 48000Hz are resampled internally and the denoised
+audio is returned at your input rate. A `wet` parameter (0.0-1.0) controls
+how aggressive the suppression is.
+
+### Voice activity detection (VAD)
+
+`process` returns the RNNoise speech probability for every 10ms frame:
 
 ```dart
-await noiseless.denoiseFile(inputPathStr: 'assets/noise.wav', outputPathStr: 'assets/output.wav');
+final result = await session.process(chunk);
+print(result.voiceProbability);         // 0.0-1.0, max over the chunk
+print(result.voiceProbabilities);       // per-frame values
 ```
 
-3. Or in real-time Flutter audio input via a `Stream`:
+### Denoising a file
 
 ```dart
-stream.listen((input) async {
-  final result = await noiseless.denoiseChunk(input: input);
-});
+await Noiseless.instance.denoiseFile(
+  inputPathStr: 'assets/noise.wav',
+  outputPathStr: 'assets/output.wav',
+);
 ```
+
+Supports 16/24/32-bit int and 32-bit float WAV at any sample rate; the
+output is 16-bit WAV at the input's sample rate.

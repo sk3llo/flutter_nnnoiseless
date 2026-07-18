@@ -116,21 +116,34 @@ class _MyAppState extends State<MyApp> {
         final rawFile = File(outputRawPath).openWrite();
         final file = File(outputPath).openWrite();
 
+        /// One session per recording: holds the denoiser state and exposes
+        /// voice activity probabilities per processed chunk.
+        final session = await NoiselessSession.create(sampleRate: 48000);
+
         final sub = stream.listen((event) async {
           /// Realtime chunk denoising
-          final result = await noiseless.denoiseChunk(input: event);
+          final result = await session.process(event);
 
           try {
             /// Save raw audio for comparison
             rawFile.add(event);
 
             /// Save denoised audio
-            file.add(result);
+            if (result.audio.isNotEmpty) file.add(result.audio);
+
+            debugPrint(
+              'voice: ${(result.voiceProbability * 100).toStringAsFixed(0)}%',
+            );
           } catch (_) {}
         });
 
         sub.onDone(() async {
           await sub.cancel();
+
+          /// Drain the buffered tail and release the native session.
+          file.add(await session.flush());
+          session.dispose();
+
           final finishedRawFile = await rawFile.close();
           final finishedFile = await file.close();
 

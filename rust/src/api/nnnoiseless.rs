@@ -7,20 +7,11 @@ use nnnoiseless::{DenoiseState, RnnModel};
 use once_cell::sync::Lazy;
 use std::path::Path;
 use std::sync::Mutex;
-use std::f32::consts::PI;
 
 /// The fixed frame size required by the nnnoiseless model.
 const FRAME_SIZE: usize = DenoiseState::FRAME_SIZE;
-const HOP_SIZE: usize = FRAME_SIZE / 2;
 /// The target sample rate the model is trained for.
 const TARGET_SAMPLE_RATE: u32 = 48000;
-
-/// Generates a Hann window for smoothing audio frames.
-fn hann_window(len: usize) -> Vec<f32> {
-    (0..len)
-        .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / (len - 1) as f32).cos()))
-        .collect()
-}
 
 // This struct holds the state required for real-time processing.
 struct DenoiseRealtimeState {
@@ -102,14 +93,42 @@ pub fn denoise_chunk(input: Vec<u8>, input_sample_rate: u32) -> Result<Vec<u8>> 
     Ok(output_bytes)
 }
 
-// The existing file-based denoising function (unchanged).
+/// Reads all samples from a WAV file as f32 in the i16 range, regardless of
+/// the underlying sample format (16/24/32-bit int or 32-bit float).
+fn read_samples_interleaved(reader: &mut WavReader<std::io::BufReader<std::fs::File>>) -> Result<Vec<f32>> {
+    let spec = reader.spec();
+    match (spec.sample_format, spec.bits_per_sample) {
+        (hound::SampleFormat::Int, 16) => reader
+            .samples::<i16>()
+            .map(|s| s.map(|v| v as f32).map_err(Into::into))
+            .collect(),
+        (hound::SampleFormat::Int, bits @ 17..=32) => {
+            // Scale down to the i16 range the model expects.
+            let shift = bits - 16;
+            reader
+                .samples::<i32>()
+                .map(|s| s.map(|v| (v >> shift) as f32).map_err(Into::into))
+                .collect()
+        }
+        (hound::SampleFormat::Float, 32) => reader
+            .samples::<f32>()
+            .map(|s| s.map(|v| v * 32767.0).map_err(Into::into))
+            .collect(),
+        (format, bits) => anyhow::bail!(
+            "Unsupported WAV format: {bits}-bit {format:?}. \
+             Supported: 16/24/32-bit int and 32-bit float."
+        ),
+    }
+}
+
+// The file-based denoising function.
 fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
     let mut reader = WavReader::open(input_path)
         .with_context(|| format!("Failed to open input file: {:?}", input_path))?;
     let spec = reader.spec();
 
-    let input_samples_interleaved: Vec<f32> =
-        reader.samples::<i16>().map(|s| s.unwrap() as f32).collect();
+    let input_samples_interleaved = read_samples_interleaved(&mut reader)
+        .with_context(|| format!("Failed to read samples from: {:?}", input_path))?;
 
     if input_samples_interleaved.is_empty() {
         anyhow::bail!("Input file is empty.");
@@ -143,7 +162,7 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
         .map(|_| DenoiseState::with_model(&model))
         .collect();
 
-    let num_samples_per_channel = resampled_channels.get(0).map_or(0, |c| c.len());
+    let num_samples_per_channel = resampled_channels.first().map_or(0, |c| c.len());
     let mut cleaned_channels: Vec<Vec<f32>> =
         vec![Vec::with_capacity(num_samples_per_channel); num_channels];
 
@@ -163,6 +182,22 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
         }
     }
 
+    // Resample back to the original rate so the output file matches the input.
+    let cleaned_channels: Vec<Vec<f32>> = if spec.sample_rate != TARGET_SAMPLE_RATE {
+        cleaned_channels
+            .into_iter()
+            .map(|channel_data| {
+                let signal = signal::from_iter(channel_data);
+                let sinc = Sinc::new(Fixed::from([0.0; 256]));
+                let resampler =
+                    signal.from_hz_to_hz(sinc, TARGET_SAMPLE_RATE as f64, spec.sample_rate as f64);
+                resampler.until_exhausted().collect::<Vec<f32>>()
+            })
+            .collect()
+    } else {
+        cleaned_channels
+    };
+
     let mut output_samples_interleaved = vec![0.0f32; cleaned_channels[0].len() * num_channels];
     for i in 0..cleaned_channels[0].len() {
         for ch in 0..num_channels {
@@ -172,7 +207,7 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
 
     let output_spec = WavSpec {
         channels: spec.channels,
-        sample_rate: TARGET_SAMPLE_RATE,
+        sample_rate: spec.sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };

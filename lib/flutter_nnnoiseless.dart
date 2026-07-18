@@ -1,7 +1,119 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart' as rust;
+import 'package:flutter_nnnoiseless/src/rust/api/session.dart' as rust;
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
 import 'package:wav/wav_file.dart';
+
+/// Initializes the underlying Rust library if it hasn't been already.
+Future<void> _ensureInitialized() async {
+  if (!RustLib.instance.initialized) {
+    await RustLib.init();
+  }
+}
+
+/// The result of processing one chunk of audio through a [NoiselessSession].
+class DenoiseResult {
+  const DenoiseResult._(this.audio, this.voiceProbabilities);
+
+  /// Denoised 16-bit PCM mono audio at the session's sample rate.
+  ///
+  /// May be empty (or a different length than the input) on any single call
+  /// while the session buffers samples towards full 10ms frames; timing evens
+  /// out across consecutive calls.
+  final Uint8List audio;
+
+  /// Voice activity probability (0.0-1.0) for each 10ms frame processed
+  /// during this call, in order.
+  final Float32List voiceProbabilities;
+
+  /// The highest voice activity probability observed in this chunk, or 0.0
+  /// if no full frame was processed.
+  double get voiceProbability =>
+      voiceProbabilities.isEmpty ? 0.0 : voiceProbabilities.reduce(math.max);
+
+  /// Whether this chunk likely contains speech.
+  bool isVoice({double threshold = 0.5}) => voiceProbability >= threshold;
+}
+
+/// A stateful denoiser for a single mono audio stream.
+///
+/// Each session owns its own RNNoise state and resamplers, so multiple
+/// sessions can run concurrently (e.g. one per microphone) and no state
+/// leaks between recordings. Create with [NoiselessSession.create], feed
+/// consecutive chunks to [process] (or pipe a stream through [transformer]),
+/// and [dispose] when done.
+///
+/// ```dart
+/// final session = await NoiselessSession.create(sampleRate: 16000);
+/// micStream.transform(session.transformer).listen(play);
+/// ```
+class NoiselessSession {
+  NoiselessSession._(this._session, this.sampleRate);
+
+  final rust.DenoiseSession _session;
+
+  /// Sample rate of the PCM audio this session consumes and produces.
+  final int sampleRate;
+
+  /// Creates a new denoising session.
+  ///
+  /// * [sampleRate] - sample rate of the raw 16-bit PCM mono audio passed to
+  ///   [process]. Output is returned at the same rate. Rates other than
+  ///   48000Hz are resampled internally (adding a small latency).
+  /// * [wet] - dry/wet mix: 1.0 (default) is fully denoised, 0.0 passes the
+  ///   audio through untouched. Lower it for less aggressive suppression.
+  static Future<NoiselessSession> create({
+    int sampleRate = 48000,
+    double wet = 1.0,
+  }) async {
+    await _ensureInitialized();
+    return NoiselessSession._(
+      rust.DenoiseSession.create(sampleRate: sampleRate, wet: wet),
+      sampleRate,
+    );
+  }
+
+  /// Denoises the next chunk of raw 16-bit PCM mono audio.
+  Future<DenoiseResult> process(Uint8List input) async {
+    final output = await _session.process(input: input);
+    return DenoiseResult._(output.audio, output.voiceProbabilities);
+  }
+
+  /// Drains any internally buffered audio, padding with silence as needed.
+  ///
+  /// Call once at the end of a stream to receive the tail of the audio.
+  Future<Uint8List> flush() => _session.flush();
+
+  /// Clears all internal state so the session can be reused for a new
+  /// stream without artifacts from the previous one.
+  Future<void> reset() => _session.reset();
+
+  /// Releases the native resources held by this session.
+  void dispose() => _session.dispose();
+
+  /// Whether [dispose] has been called.
+  bool get isDisposed => _session.isDisposed;
+
+  /// Denoises a raw PCM stream, yielding denoised PCM chunks.
+  ///
+  /// The tail of the audio (from [flush]) is emitted when [source] closes.
+  Stream<Uint8List> bind(Stream<Uint8List> source) async* {
+    await for (final chunk in source) {
+      final result = await process(chunk);
+      if (result.audio.isNotEmpty) yield result.audio;
+    }
+    final tail = await flush();
+    if (tail.isNotEmpty) yield tail;
+  }
+
+  /// A transformer for piping a microphone stream through this session:
+  /// `micStream.transform(session.transformer)`.
+  StreamTransformer<Uint8List, Uint8List> get transformer =>
+      StreamTransformer.fromBind(bind);
+}
 
 /// A Dart interface for the nnnoiseless Rust library.
 ///
@@ -14,8 +126,9 @@ abstract class Noiseless {
   /// Denoises an entire audio file.
   ///
   /// This function reads an audio file from [inputPathStr], processes it,
-  /// and saves the cleaned audio to [outputPathStr]. It handles different
-  /// audio formats and sample rates automatically.
+  /// and saves the cleaned audio to [outputPathStr]. Supports 16/24/32-bit
+  /// int and 32-bit float WAV input at any sample rate; the output is
+  /// written as 16-bit WAV at the input's sample rate.
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
@@ -23,10 +136,14 @@ abstract class Noiseless {
 
   /// Denoises a single chunk of raw audio data.
   ///
-  /// This is suitable for real-time processing, such as from a microphone stream.
   /// The [input] is expected to be raw 16-bit PCM audio.
   /// The [inputSampleRate] defaults to 48000Hz, which is what the model is
-  /// optimized for.
+  /// optimized for. Note: output is always returned at 48000Hz.
+  @Deprecated(
+    'Use NoiselessSession instead: it supports multiple concurrent streams, '
+    'exposes voice activity probabilities, returns audio at the input sample '
+    'rate, and can be reset between recordings.',
+  )
   Future<Uint8List> denoiseChunk({
     required Uint8List input,
     int inputSampleRate = 48000,
@@ -34,7 +151,8 @@ abstract class Noiseless {
 
   /// Converts a raw 16-bit PCM audio buffer into a WAV file.
   ///
-  /// Useful for saving the output of [denoiseChunk] to a playable format.
+  /// Useful for saving the output of a [NoiselessSession] to a playable
+  /// format.
   Future<void> pcmToWav({
     required Uint8List pcmData,
     required String outputPath,
@@ -45,13 +163,6 @@ abstract class Noiseless {
 
 /// The concrete implementation of the [Noiseless] interface.
 class _NoiselessImpl extends Noiseless {
-  /// Initializes the underlying Rust library if it hasn't been already.
-  Future<void> _ensureInitialized() async {
-    if (!RustLib.instance.initialized) {
-      await RustLib.init();
-    }
-  }
-
   @override
   Future<void> denoiseFile({
     required String inputPathStr,

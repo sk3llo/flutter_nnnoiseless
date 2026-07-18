@@ -116,6 +116,8 @@ abstract class RustLibApi extends BaseApi {
   Stream<double> crateApiNnnoiselessDenoiseFileWithProgress({
     required String inputPathStr,
     required String outputPathStr,
+    required double wet,
+    Uint8List? model,
     required CancelToken cancelToken,
   });
 
@@ -446,6 +448,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Stream<double> crateApiNnnoiselessDenoiseFileWithProgress({
     required String inputPathStr,
     required String outputPathStr,
+    required double wet,
+    Uint8List? model,
     required CancelToken cancelToken,
   }) {
     final progressSink = RustStreamSink<double>();
@@ -456,6 +460,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             final serializer = SseSerializer(generalizedFrbRustBinding);
             sse_encode_String(inputPathStr, serializer);
             sse_encode_String(outputPathStr, serializer);
+            sse_encode_f_32(wet, serializer);
+            sse_encode_opt_list_prim_u_8_strict(model, serializer);
             sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerCancelToken(
               cancelToken,
               serializer,
@@ -473,7 +479,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             decodeErrorData: null,
           ),
           constMeta: kCrateApiNnnoiselessDenoiseFileWithProgressConstMeta,
-          argValues: [inputPathStr, outputPathStr, cancelToken, progressSink],
+          argValues: [
+            inputPathStr,
+            outputPathStr,
+            wet,
+            model,
+            cancelToken,
+            progressSink,
+          ],
           apiImpl: this,
         ),
       ),
@@ -487,6 +500,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argNames: [
           "inputPathStr",
           "outputPathStr",
+          "wet",
+          "model",
           "cancelToken",
           "progressSink",
         ],

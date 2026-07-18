@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_nnnoiseless'
-  s.version          = '1.2.0'
+  s.version          = '1.3.0'
   s.summary          = 'Real-time and batch audio noise reduction for Flutter.'
   s.description      = <<-DESC
 Real-time and batch audio noise reduction for Flutter. A port of the

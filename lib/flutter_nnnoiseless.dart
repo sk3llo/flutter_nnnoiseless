@@ -186,18 +186,24 @@ abstract class Noiseless {
   /// Denoises an entire audio file.
   ///
   /// This function reads an audio file from [inputPathStr], processes it,
-  /// and saves the cleaned audio to [outputPathStr]. Supports 16/24/32-bit
-  /// int and 32-bit float WAV input at any sample rate; the output is
-  /// written as 16-bit WAV at the input's sample rate.
+  /// and saves the cleaned audio to [outputPathStr]. Input can be WAV (any
+  /// bit depth), FLAC, MP3, OGG/Vorbis, or M4A/AAC at any sample rate; the
+  /// output is written as 16-bit WAV at the input's sample rate and channel
+  /// count.
   ///
   /// [onProgress] is invoked with a fraction from 0.0 to 1.0 as the file is
   /// processed. Pass a [NoiselessCancelToken] as [cancelToken] to be able to
   /// abort the operation; cancellation throws a [DenoiseCancelledException].
+  /// [wet] (0.0-1.0) controls suppression strength, and [model] accepts a
+  /// custom RNNoise model in the nnnoiseless training format, matching the
+  /// equivalent [NoiselessSession] options.
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
     void Function(double progress)? onProgress,
     NoiselessCancelToken? cancelToken,
+    double wet = 1.0,
+    Uint8List? model,
   });
 
   /// Denoises a single chunk of raw audio data.
@@ -235,9 +241,11 @@ class _NoiselessImpl extends Noiseless {
     required String outputPathStr,
     void Function(double progress)? onProgress,
     NoiselessCancelToken? cancelToken,
+    double wet = 1.0,
+    Uint8List? model,
   }) async {
     await _ensureInitialized();
-    if (onProgress == null && cancelToken == null) {
+    if (onProgress == null && cancelToken == null && wet == 1.0 && model == null) {
       return rust.denoise(
         inputPathStr: inputPathStr,
         outputPathStr: outputPathStr,
@@ -252,6 +260,8 @@ class _NoiselessImpl extends Noiseless {
     final progress = rust.denoiseFileWithProgress(
       inputPathStr: inputPathStr,
       outputPathStr: outputPathStr,
+      wet: wet,
+      model: model,
       cancelToken: token._materialize(),
     );
     try {

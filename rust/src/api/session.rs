@@ -9,8 +9,9 @@ const FRAME_SIZE: usize = DenoiseState::FRAME_SIZE;
 const TARGET_SAMPLE_RATE: u32 = 48000;
 /// Fixed input size fed to the streaming resamplers.
 const RESAMPLER_CHUNK: usize = 1024;
-/// Upper bound on interleaved channels per session.
-const MAX_CHANNELS: usize = 8;
+/// Upper bound on interleaved channels per session (shared with the file
+/// pipeline).
+pub(crate) const MAX_CHANNELS: usize = 8;
 
 /// The result of processing one chunk of audio through a [DenoiseSession].
 pub struct DenoiseOutput {
@@ -333,8 +334,8 @@ impl DenoiseSession {
 }
 
 /// Builds a denoiser from the custom model when one is set, or the built-in
-/// model otherwise.
-fn make_denoiser(model: &Option<RnnModel>) -> Box<DenoiseState<'static>> {
+/// model otherwise. Shared with the file-denoising pipeline.
+pub(crate) fn make_denoiser(model: &Option<RnnModel>) -> Box<DenoiseState<'static>> {
     match model {
         Some(m) => DenoiseState::from_model(m.clone()),
         None => DenoiseState::new(),

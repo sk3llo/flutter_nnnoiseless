@@ -477,6 +477,8 @@ fn wire__crate__api__nnnoiseless__denoise_file_with_progress_impl(
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
             let api_input_path_str = <String>::sse_decode(&mut deserializer);
             let api_output_path_str = <String>::sse_decode(&mut deserializer);
+            let api_wet = <f32>::sse_decode(&mut deserializer);
+            let api_model = <Option<Vec<u8>>>::sse_decode(&mut deserializer);
             let api_cancel_token = <RustOpaqueMoi<
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<CancelToken>,
             >>::sse_decode(&mut deserializer);
@@ -510,6 +512,8 @@ fn wire__crate__api__nnnoiseless__denoise_file_with_progress_impl(
                         crate::api::nnnoiseless::denoise_file_with_progress(
                             api_input_path_str,
                             api_output_path_str,
+                            api_wet,
+                            api_model,
                             &*api_cancel_token_guard,
                             api_progress_sink,
                         );

@@ -6,8 +6,8 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `denoise_wav`, `read_samples_interleaved`, `resample_channels`
-// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DenoiseRealtimeState`
+// These functions are ignored because they are not marked as `pub`: `decode_audio_file`, `denoise_file_impl`, `resample_channels`
+// These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DecodedAudio`, `DenoiseRealtimeState`
 
 /// Denoises a chunk of raw audio bytes in real-time.
 ///
@@ -50,10 +50,14 @@ Future<void> denoise({
 Stream<double> denoiseFileWithProgress({
   required String inputPathStr,
   required String outputPathStr,
+  required double wet,
+  Uint8List? model,
   required CancelToken cancelToken,
 }) => RustLib.instance.api.crateApiNnnoiselessDenoiseFileWithProgress(
   inputPathStr: inputPathStr,
   outputPathStr: outputPathStr,
+  wet: wet,
+  model: model,
   cancelToken: cancelToken,
 );
 

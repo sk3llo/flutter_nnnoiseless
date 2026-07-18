@@ -3,7 +3,7 @@ use dasp::interpolate::sinc::Sinc;
 use dasp::ring_buffer::Fixed;
 use dasp::{signal, Signal};
 use flutter_rust_bridge::frb;
-use hound::{WavReader, WavSpec, WavWriter};
+use hound::{WavSpec, WavWriter};
 use nnnoiseless::{DenoiseState, RnnModel};
 use once_cell::sync::Lazy;
 use std::path::Path;
@@ -128,32 +128,158 @@ pub fn denoise_chunk(input: Vec<u8>, input_sample_rate: u32) -> Result<Vec<u8>> 
     Ok(output_bytes)
 }
 
-/// Reads all samples from a WAV file as f32 in the i16 range, regardless of
-/// the underlying sample format (16/24/32-bit int or 32-bit float).
-fn read_samples_interleaved(reader: &mut WavReader<std::io::BufReader<std::fs::File>>) -> Result<Vec<f32>> {
-    let spec = reader.spec();
-    match (spec.sample_format, spec.bits_per_sample) {
-        (hound::SampleFormat::Int, 16) => reader
-            .samples::<i16>()
-            .map(|s| s.map(|v| v as f32).map_err(Into::into))
-            .collect(),
-        (hound::SampleFormat::Int, bits @ 17..=32) => {
-            // Scale down to the i16 range the model expects.
-            let shift = bits - 16;
-            reader
-                .samples::<i32>()
-                .map(|s| s.map(|v| (v >> shift) as f32).map_err(Into::into))
-                .collect()
-        }
-        (hound::SampleFormat::Float, 32) => reader
-            .samples::<f32>()
-            .map(|s| s.map(|v| v * 32767.0).map_err(Into::into))
-            .collect(),
-        (format, bits) => anyhow::bail!(
-            "Unsupported WAV format: {bits}-bit {format:?}. \
-             Supported: 16/24/32-bit int and 32-bit float."
-        ),
+/// Longest input accepted by the file pipeline; crafted headers past this
+/// would otherwise expand into unbounded memory during decode/resample.
+const MAX_INPUT_DURATION_SECONDS: u64 = 6 * 3600;
+
+/// Decoded audio: interleaved samples in the i16 range, plus stream layout.
+struct DecodedAudio {
+    samples_interleaved: Vec<f32>,
+    sample_rate: u32,
+    channels: usize,
+}
+
+/// Decodes any audio file symphonia understands (WAV at any bit depth,
+/// FLAC, MP3, OGG/Vorbis, M4A/AAC) into interleaved f32 samples in the
+/// i16 range the RNNoise model expects.
+fn decode_audio_file(input_path: &Path, cancel: Option<&AtomicBool>) -> Result<DecodedAudio> {
+    use symphonia::core::audio::SampleBuffer;
+    use symphonia::core::codecs::DecoderOptions;
+    use symphonia::core::errors::Error as SymphoniaError;
+    use symphonia::core::formats::FormatOptions;
+    use symphonia::core::io::MediaSourceStream;
+    use symphonia::core::meta::MetadataOptions;
+    use symphonia::core::probe::Hint;
+
+    let file = std::fs::File::open(input_path)
+        .with_context(|| format!("Failed to open input file: {:?}", input_path))?;
+    let stream = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(extension) = input_path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(extension);
     }
+
+    let probed = symphonia::default::get_probe()
+        .format(
+            &hint,
+            stream,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .with_context(|| format!("Unrecognized audio format: {:?}", input_path))?;
+    let mut format = probed.format;
+
+    // Pick the first track the codec registry can actually decode; the
+    // container's default track may be video or an unsupported codec even
+    // when a decodable audio track exists.
+    let codecs = symphonia::default::get_codecs();
+    let mut selected = None;
+    for track in format.tracks() {
+        if let Ok(decoder) = codecs.make(&track.codec_params, &DecoderOptions::default()) {
+            selected = Some((track.id, decoder));
+            break;
+        }
+    }
+    let (track_id, mut decoder) =
+        selected.context("No decodable audio track found in input file")?;
+
+    // The decoder's actual output spec is the source of truth: containers
+    // can declare a different rate/layout than the codec configuration
+    // really produces (e.g. a mis-remuxed M4A), which would otherwise
+    // corrupt de-interleaving and resampling downstream.
+    let mut decoded_spec: Option<(u32, usize)> = None;
+    let mut samples_interleaved = Vec::new();
+    let mut sample_buffer: Option<SampleBuffer<f32>> = None;
+    let mut buffer_frames = 0u64;
+    let mut packet_count = 0usize;
+    let mut consecutive_decode_errors = 0usize;
+    loop {
+        if packet_count.is_multiple_of(256) && cancel.is_some_and(|c| c.load(Ordering::SeqCst)) {
+            anyhow::bail!("Denoising cancelled");
+        }
+        packet_count += 1;
+
+        let packet = match format.next_packet() {
+            Ok(packet) => packet,
+            Err(SymphoniaError::IoError(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                break;
+            }
+            Err(SymphoniaError::ResetRequired) => {
+                anyhow::bail!("Input stream parameters changed mid-file (unsupported)");
+            }
+            Err(e) => return Err(e).context("Failed to read audio packet"),
+        };
+        if packet.track_id() != track_id {
+            continue;
+        }
+        match decoder.decode(&packet) {
+            Ok(decoded) => {
+                consecutive_decode_errors = 0;
+                let spec = *decoded.spec();
+                let this_spec = (spec.rate, spec.channels.count());
+                match decoded_spec {
+                    None => decoded_spec = Some(this_spec),
+                    Some(existing) if existing != this_spec => {
+                        anyhow::bail!(
+                            "Audio specification changed mid-file (unsupported): \
+                             {existing:?} -> {this_spec:?}"
+                        );
+                    }
+                    _ => {}
+                }
+                if sample_buffer.is_none() || (decoded.capacity() as u64) > buffer_frames {
+                    buffer_frames = decoded.capacity() as u64;
+                    sample_buffer = Some(SampleBuffer::<f32>::new(buffer_frames, spec));
+                }
+                let buffer = sample_buffer.as_mut().unwrap();
+                buffer.copy_interleaved_ref(decoded);
+                samples_interleaved
+                    .extend(buffer.samples().iter().map(|s| s * 32767.0));
+
+                // Guard against crafted headers that would otherwise expand
+                // into unbounded memory.
+                let max_samples =
+                    this_spec.0 as u64 * MAX_INPUT_DURATION_SECONDS * this_spec.1 as u64;
+                if samples_interleaved.len() as u64 > max_samples {
+                    anyhow::bail!(
+                        "Input file is too long (over {} hours)",
+                        MAX_INPUT_DURATION_SECONDS / 3600
+                    );
+                }
+            }
+            // Skip over corrupt packets instead of failing the whole file,
+            // as symphonia recommends -- but a long unbroken run of them
+            // means the file is junk, not merely damaged.
+            Err(SymphoniaError::DecodeError(_)) => {
+                consecutive_decode_errors += 1;
+                if consecutive_decode_errors > 64 {
+                    anyhow::bail!("Input file contains too many corrupt audio packets");
+                }
+                continue;
+            }
+            Err(e) => return Err(e).context("Failed to decode audio"),
+        }
+    }
+
+    let (sample_rate, channels) =
+        decoded_spec.context("Input file contains no decodable audio")?;
+    anyhow::ensure!(
+        (1_000..=384_000).contains(&sample_rate),
+        "Unsupported sample rate: {sample_rate}Hz"
+    );
+    anyhow::ensure!(
+        (1..=crate::api::session::MAX_CHANNELS).contains(&channels),
+        "Unsupported channel count: {channels}"
+    );
+
+    Ok(DecodedAudio {
+        samples_interleaved,
+        sample_rate,
+        channels,
+    })
 }
 
 /// Resamples each channel, checking for cancellation periodically and
@@ -187,15 +313,29 @@ fn resample_channels(
 }
 
 // The file-based denoising function. Progress is reported as a fraction in
-// 0.0..=1.0 across all phases (resample in: 0-0.10, denoise: 0.10-0.85,
-// resample out: 0.85-0.95, write: 0.95-1.0); cancellation is checked
-// periodically in every phase.
-fn denoise_wav(
+// 0.0..=1.0 across all phases (decode+resample in: 0-0.10, denoise:
+// 0.10-0.85, resample out: 0.85-0.95, write: 0.95-1.0); cancellation is
+// checked periodically in every phase.
+fn denoise_file_impl(
     input_path: &Path,
     output_path: &Path,
+    wet: f32,
+    model_bytes: Option<Vec<u8>>,
     mut on_progress: impl FnMut(f64),
     cancel: Option<&AtomicBool>,
 ) -> Result<()> {
+    anyhow::ensure!(
+        (0.0..=1.0).contains(&wet),
+        "wet must be between 0.0 and 1.0, got {wet}"
+    );
+    let model = match model_bytes {
+        Some(bytes) => Some(
+            RnnModel::from_bytes(&bytes)
+                .context("Invalid RNNoise model data (expected nnnoiseless training format)")?,
+        ),
+        None => None,
+    };
+
     let cancelled = || cancel.is_some_and(|c| c.load(Ordering::SeqCst));
     let mut last_reported = -1.0f64;
     let mut report = |fraction: f64| {
@@ -205,18 +345,15 @@ fn denoise_wav(
         }
     };
 
-    let mut reader = WavReader::open(input_path)
-        .with_context(|| format!("Failed to open input file: {:?}", input_path))?;
-    let spec = reader.spec();
-
-    let input_samples_interleaved = read_samples_interleaved(&mut reader)
-        .with_context(|| format!("Failed to read samples from: {:?}", input_path))?;
+    let decoded = decode_audio_file(input_path, cancel)?;
+    let input_samples_interleaved = decoded.samples_interleaved;
+    let sample_rate = decoded.sample_rate;
+    let num_channels = decoded.channels;
 
     if input_samples_interleaved.is_empty() {
-        anyhow::bail!("Input file is empty.");
+        anyhow::bail!("Input file contains no audio.");
     }
-
-    let num_channels = spec.channels as usize;
+    report(0.02);
 
     let mut channel_buffers: Vec<Vec<f32>> =
         vec![Vec::with_capacity(input_samples_interleaved.len() / num_channels); num_channels];
@@ -231,22 +368,21 @@ fn denoise_wav(
         buffer.truncate(min_len);
     }
 
-    let resampled_channels = if spec.sample_rate != TARGET_SAMPLE_RATE {
+    let resampled_channels = if sample_rate != TARGET_SAMPLE_RATE {
         resample_channels(
             channel_buffers,
-            spec.sample_rate as f64,
+            sample_rate as f64,
             TARGET_SAMPLE_RATE as f64,
             cancel,
-            (0.0, 0.10),
+            (0.02, 0.10),
             &mut report,
         )?
     } else {
         channel_buffers
     };
 
-    let model = RnnModel::default();
     let mut denoisers: Vec<Box<DenoiseState>> = (0..num_channels)
-        .map(|_| DenoiseState::with_model(&model))
+        .map(|_| crate::api::session::make_denoiser(&model))
         .collect();
 
     let num_samples_per_channel = resampled_channels.first().map_or(0, |c| c.len());
@@ -267,6 +403,11 @@ fn denoise_wav(
 
             let mut output_frame = vec![0.0f32; FRAME_SIZE];
             denoisers[ch].process_frame(&mut output_frame, &input_frame);
+            if wet < 1.0 {
+                for (o, i) in output_frame.iter_mut().zip(&input_frame) {
+                    *o = wet * *o + (1.0 - wet) * i;
+                }
+            }
 
             let output_len = frame_end - frame_start;
             cleaned_channels[ch].extend_from_slice(&output_frame[..output_len]);
@@ -274,11 +415,11 @@ fn denoise_wav(
     }
 
     // Resample back to the original rate so the output file matches the input.
-    let cleaned_channels: Vec<Vec<f32>> = if spec.sample_rate != TARGET_SAMPLE_RATE {
+    let cleaned_channels: Vec<Vec<f32>> = if sample_rate != TARGET_SAMPLE_RATE {
         resample_channels(
             cleaned_channels,
             TARGET_SAMPLE_RATE as f64,
-            spec.sample_rate as f64,
+            sample_rate as f64,
             cancel,
             (0.85, 0.95),
             &mut report,
@@ -295,8 +436,8 @@ fn denoise_wav(
     }
 
     let output_spec = WavSpec {
-        channels: spec.channels,
-        sample_rate: spec.sample_rate,
+        channels: num_channels as u16,
+        sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
@@ -325,11 +466,11 @@ fn denoise_wav(
     Ok(())
 }
 
-// Wrapper function for file-based denoising.
+// Wrapper function for file-based denoising with default settings.
 pub fn denoise(input_path_str: &String, output_path_str: &String) -> Result<()> {
     let input_path = Path::new(input_path_str);
     let output_path = Path::new(output_path_str);
-    denoise_wav(input_path, output_path, |_| {}, None)
+    denoise_file_impl(input_path, output_path, 1.0, None, |_| {}, None)
 }
 
 /// Denoises an audio file while streaming progress (0.0..=1.0) to Dart.
@@ -347,15 +488,19 @@ pub fn denoise(input_path_str: &String, output_path_str: &String) -> Result<()> 
 pub fn denoise_file_with_progress(
     input_path_str: String,
     output_path_str: String,
+    wet: f32,
+    model: Option<Vec<u8>>,
     cancel_token: &CancelToken,
     progress_sink: StreamSink<f64>,
 ) {
     let flag = cancel_token.flag.clone();
     std::thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            denoise_wav(
+            denoise_file_impl(
                 Path::new(&input_path_str),
                 Path::new(&output_path_str),
+                wet,
+                model,
                 |fraction| {
                     let _ = progress_sink.add(fraction);
                 },

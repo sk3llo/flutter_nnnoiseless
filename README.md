@@ -16,7 +16,7 @@ _Real-time and batch audio noise reduction for Flutter. A port of the [nnnoisele
 
 - Real-time denoising of raw PCM audio streams, such as microphone input
 - Voice activity detection (VAD): a speech probability for every 10ms frame
-- Batch denoising of WAV files (16/24/32-bit int and 32-bit float), with progress reporting and cancellation
+- Batch denoising of audio files (WAV, FLAC, MP3, OGG, M4A/AAC), with progress reporting and cancellation
 - Multiple concurrent sessions, each with fully isolated state
 - Multi-channel audio: interleaved PCM with up to 8 channels per session
 - Custom RNNoise models trained on your own noise profiles
@@ -106,14 +106,15 @@ if (result.isVoice()) {
 final token = NoiselessCancelToken();
 
 await Noiseless.instance.denoiseFile(
-  inputPathStr: 'assets/noise.wav',
+  inputPathStr: 'assets/noisy_recording.mp3',
   outputPathStr: 'assets/output.wav',
   onProgress: (fraction) => print('${(fraction * 100).round()}%'),
   cancelToken: token, // token.cancel() aborts with DenoiseCancelledException
+  wet: 0.9,           // optional: suppression strength
 );
 ```
 
-Both `onProgress` and `cancelToken` are optional. Input can be 16/24/32-bit int or 32-bit float WAV at any sample rate. The output is written as 16-bit WAV at the input's sample rate.
+All parameters besides the paths are optional (`onProgress`, `cancelToken`, `wet`, and `model` for custom RNNoise weights). Input can be WAV (any bit depth), FLAC, MP3, OGG/Vorbis, or M4A/AAC at any sample rate. The output is written as 16-bit WAV at the input's sample rate and channel count.
 
 ### Saving PCM output as WAV
 

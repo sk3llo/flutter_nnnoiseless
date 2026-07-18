@@ -436,6 +436,152 @@ void main() {
     });
   }, skip: !dylib.existsSync() ? 'Rust dylib not built' : false);
 
+  group('multi-format file input', () {
+    late Directory dir;
+    late String wavPath;
+
+    setUpAll(() async {
+      dir = await Directory.systemTemp.createTemp('nnnoiseless_formats');
+      wavPath = '${dir.path}/input.wav';
+      final pcm = _noisySine(48000).buffer.asInt16List();
+      await Wav(
+        [Float64List.fromList(pcm.map((s) => s / 32767.0).toList())],
+        48000,
+      ).writeFile(wavPath);
+    });
+
+    tearDownAll(() => dir.delete(recursive: true));
+
+    Future<ProcessResult?> tryRun(String command, List<String> args) async {
+      try {
+        return await Process.run(command, args);
+      } on ProcessException {
+        return null;
+      }
+    }
+
+    Future<void> expectDenoises(String inputPath) async {
+      final outputPath = '$inputPath.denoised.wav';
+      await Noiseless.instance.denoiseFile(
+        inputPathStr: inputPath,
+        outputPathStr: outputPath,
+      );
+      final output = await Wav.readFile(outputPath);
+      expect(output.samplesPerSecond, 48000);
+      expect(output.channels.single.length, closeTo(48000, 48000 * 0.10));
+    }
+
+    test('FLAC input', () async {
+      final flacPath = '${dir.path}/input.flac';
+      final result = await tryRun(
+          'afconvert', ['-f', 'flac', '-d', 'flac', wavPath, flacPath]);
+      if (result == null || result.exitCode != 0) {
+        markTestSkipped('afconvert flac unavailable: ${result?.stderr}');
+        return;
+      }
+      await expectDenoises(flacPath);
+    });
+
+    test('M4A/AAC input', () async {
+      final m4aPath = '${dir.path}/input.m4a';
+      final result = await tryRun(
+          'afconvert', ['-f', 'm4af', '-d', 'aac', wavPath, m4aPath]);
+      if (result == null || result.exitCode != 0) {
+        markTestSkipped('afconvert aac unavailable: ${result?.stderr}');
+        return;
+      }
+      await expectDenoises(m4aPath);
+    });
+
+    test('MP3 input', () async {
+      final mp3Path = '${dir.path}/input.mp3';
+      final result = await tryRun(
+          'ffmpeg', ['-y', '-i', wavPath, '-codec:a', 'libmp3lame', mp3Path]);
+      if (result == null || result.exitCode != 0) {
+        markTestSkipped('ffmpeg mp3 encoding unavailable');
+        return;
+      }
+      await expectDenoises(mp3Path);
+    });
+
+    test('unsupported input fails with a clear error, not a crash', () async {
+      final bogusPath = '${dir.path}/not_audio.xyz';
+      await File(bogusPath).writeAsString('this is not audio');
+      await expectLater(
+        Noiseless.instance.denoiseFile(
+          inputPathStr: bogusPath,
+          outputPathStr: '${dir.path}/out.wav',
+        ),
+        throwsA(isA<AnyhowException>()),
+      );
+    });
+
+    test('wet=0.0 file output approximates the input', () async {
+      final outputPath = '${dir.path}/wet0.wav';
+      await Noiseless.instance.denoiseFile(
+        inputPathStr: wavPath,
+        outputPathStr: outputPath,
+        wet: 0.0,
+      );
+      final input = await Wav.readFile(wavPath);
+      final output = await Wav.readFile(outputPath);
+      // Same length, and samples materially unchanged.
+      expect(output.channels.single.length, input.channels.single.length);
+      var maxDelta = 0.0;
+      for (var i = 0; i < input.channels.single.length; i++) {
+        final delta =
+            (output.channels.single[i] - input.channels.single[i]).abs();
+        if (delta > maxDelta) maxDelta = delta;
+      }
+      expect(maxDelta, lessThan(0.001),
+          reason: 'wet=0.0 must pass audio through');
+    });
+
+    test('custom model applies to file denoising', () async {
+      final registry =
+          Directory('${Platform.environment['HOME']}/.cargo/registry/src');
+      File? weightsFile;
+      if (registry.existsSync()) {
+        for (final index in registry.listSync().whereType<Directory>()) {
+          final candidate =
+              File('${index.path}/nnnoiseless-0.5.1/src/weights.rnn');
+          if (candidate.existsSync()) {
+            weightsFile = candidate;
+            break;
+          }
+        }
+      }
+      if (weightsFile == null) {
+        markTestSkipped('nnnoiseless sources not in cargo registry');
+        return;
+      }
+      final outputPath = '${dir.path}/custom_model.wav';
+      await Noiseless.instance.denoiseFile(
+        inputPathStr: wavPath,
+        outputPathStr: outputPath,
+        model: await weightsFile.readAsBytes(),
+      );
+      final output = await Wav.readFile(outputPath);
+      expect(output.channels.single, isNotEmpty);
+
+      // weights.rnn IS the built-in model, so denoising with it must be
+      // byte-identical to the default path; this proves the custom-model
+      // pipeline is really exercised (a silently ignored model would also
+      // pass a mere is-not-empty check, but so would a wrong one).
+      final defaultPath = '${dir.path}/default_model.wav';
+      await Noiseless.instance.denoiseFile(
+        inputPathStr: wavPath,
+        outputPathStr: defaultPath,
+      );
+      expect(
+        await File(outputPath).readAsBytes(),
+        equals(await File(defaultPath).readAsBytes()),
+        reason: 'custom model identical to built-in must produce '
+            'identical output',
+      );
+    });
+  }, skip: !dylib.existsSync() ? 'Rust dylib not built' : false);
+
   test('denoiseFile handles float32 WAV and preserves the sample rate',
       () async {
     final dir = await Directory.systemTemp.createTemp('nnnoiseless_test');

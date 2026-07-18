@@ -1,3 +1,27 @@
+## 1.3.0
+
+- **Denoise any audio file**: `denoiseFile` now decodes FLAC, MP3,
+  OGG/Vorbis, and M4A/AAC in addition to WAV (any bit depth), via
+  symphonia; output remains 16-bit WAV at the input's rate and channel
+  count
+- **`denoiseFile` feature parity with sessions**: new `wet` (suppression
+  strength) and `model` (custom RNNoise weights) parameters
+- Corrupt packets in compressed files are skipped instead of failing the
+  whole file; unsupported formats fail with a clear error
+- Example app rewritten to showcase the API: file denoising with a live
+  progress bar and cancel button, and a real-time microphone demo with a
+  voice-activity meter
+- Decode hardening from an adversarial review pass:
+  - the decoder's actual output spec is trusted over container-declared
+    values, so mis-remuxed or crafted files can no longer produce
+    pitch-shifted or channel-garbled output while reporting success
+  - crafted headers (0Hz or absurd sample rates, huge channel counts,
+    unbounded stream lengths) now fail with clear errors instead of
+    panicking or exhausting memory
+  - a mid-file spec change or a long run of corrupt packets is an error
+    instead of silent truncation; the first decodable audio track is
+    selected even when the container's default track is not audio
+
 ## 1.2.0
 
 - **Multi-channel sessions**: `NoiselessSession.create(channels: n)` denoises

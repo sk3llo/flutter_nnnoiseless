@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `denoise_wav`, `read_samples_interleaved`
+// These functions are ignored because they are not marked as `pub`: `denoise_wav`, `read_samples_interleaved`, `resample_channels`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `DenoiseRealtimeState`
 
 /// Denoises a chunk of raw audio bytes in real-time.
@@ -34,3 +34,38 @@ Future<void> denoise({
   inputPathStr: inputPathStr,
   outputPathStr: outputPathStr,
 );
+
+/// Denoises an audio file while streaming progress (0.0..=1.0) to Dart.
+///
+/// The stream closes when denoising completes. Failures (including
+/// cancellation via `cancel_token`, whose error contains "cancelled") are
+/// delivered as an error event on the stream, since the function itself is
+/// fire-and-forget on the Dart side. Progress events are best-effort: a
+/// dropped stream listener does not abort the work.
+///
+/// The work runs on a dedicated thread so a long file denoise never occupies
+/// a worker of the shared FFI thread pool (which real-time sessions need),
+/// and panics are caught and surfaced as stream errors instead of silently
+/// closing the stream as if the file had been written.
+Stream<double> denoiseFileWithProgress({
+  required String inputPathStr,
+  required String outputPathStr,
+  required CancelToken cancelToken,
+}) => RustLib.instance.api.crateApiNnnoiselessDenoiseFileWithProgress(
+  inputPathStr: inputPathStr,
+  outputPathStr: outputPathStr,
+  cancelToken: cancelToken,
+);
+
+// Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<CancelToken>>
+abstract class CancelToken implements RustOpaqueInterface {
+  /// Requests cancellation of the operation holding this token.
+  void cancel();
+
+  /// Creates a new, un-cancelled token.
+  static CancelToken create() =>
+      RustLib.instance.api.crateApiNnnoiselessCancelTokenCreate();
+
+  /// Whether [cancel] has been called.
+  bool isCancelled();
+}

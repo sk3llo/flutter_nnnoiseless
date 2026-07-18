@@ -16,8 +16,10 @@ _Real-time and batch audio noise reduction for Flutter. A port of the [nnnoisele
 
 - Real-time denoising of raw PCM audio streams, such as microphone input
 - Voice activity detection (VAD): a speech probability for every 10ms frame
-- Batch denoising of WAV files (16/24/32-bit int and 32-bit float)
+- Batch denoising of WAV files (16/24/32-bit int and 32-bit float), with progress reporting and cancellation
 - Multiple concurrent sessions, each with fully isolated state
+- Multi-channel audio: interleaved PCM with up to 8 channels per session
+- Custom RNNoise models trained on your own noise profiles
 - Built-in streaming resampling: feed any sample rate, get the same rate back
 - Adjustable suppression strength via a dry/wet mix parameter
 - No Rust toolchain required: prebuilt, signed native libraries are downloaded automatically at build time
@@ -73,6 +75,16 @@ session.dispose();                  // ...or release it
 
 Sample rates other than 48000Hz are resampled internally and the denoised audio is returned at your input rate. The `wet` parameter of `NoiselessSession.create` (0.0 to 1.0) controls how aggressive the suppression is.
 
+Sessions handle interleaved multi-channel audio and custom RNNoise models too:
+
+```dart
+final stereo = await NoiselessSession.create(channels: 2);
+
+final custom = await NoiselessSession.create(
+  model: await File('my_model.rnn').readAsBytes(),
+);
+```
+
 ### Voice activity detection
 
 `process` returns the RNNoise speech probability for every 10ms frame:
@@ -91,13 +103,17 @@ if (result.isVoice()) {
 ### Denoising a file
 
 ```dart
+final token = NoiselessCancelToken();
+
 await Noiseless.instance.denoiseFile(
   inputPathStr: 'assets/noise.wav',
   outputPathStr: 'assets/output.wav',
+  onProgress: (fraction) => print('${(fraction * 100).round()}%'),
+  cancelToken: token, // token.cancel() aborts with DenoiseCancelledException
 );
 ```
 
-Input can be 16/24/32-bit int or 32-bit float WAV at any sample rate. The output is written as 16-bit WAV at the input's sample rate.
+Both `onProgress` and `cancelToken` are optional. Input can be 16/24/32-bit int or 32-bit float WAV at any sample rate. The output is written as 16-bit WAV at the input's sample rate.
 
 ### Saving PCM output as WAV
 

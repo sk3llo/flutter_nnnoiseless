@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart' as rust;
 import 'package:flutter_nnnoiseless/src/rust/api/session.dart' as rust;
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge.dart'
+    show AnyhowException;
 import 'package:wav/wav_file.dart';
 
 /// Initializes the underlying Rust library if it hasn't been already.
@@ -18,7 +20,8 @@ Future<void> _ensureInitialized() async {
 class DenoiseResult {
   const DenoiseResult._(this.audio, this.voiceProbabilities);
 
-  /// Denoised 16-bit PCM mono audio at the session's sample rate.
+  /// Denoised 16-bit PCM audio at the session's sample rate, interleaved
+  /// with the session's channel count.
   ///
   /// May be empty (or a different length than the input) on any single call
   /// while the session buffers samples towards full 10ms frames; timing evens
@@ -26,7 +29,8 @@ class DenoiseResult {
   final Uint8List audio;
 
   /// Voice activity probability (0.0-1.0) for each 10ms frame processed
-  /// during this call, in order.
+  /// during this call, in order. For multi-channel sessions each value is
+  /// the maximum across channels for that frame.
   final Float32List voiceProbabilities;
 
   /// The highest voice activity probability observed in this chunk, or 0.0
@@ -38,7 +42,7 @@ class DenoiseResult {
   bool isVoice({double threshold = 0.5}) => voiceProbability >= threshold;
 }
 
-/// A stateful denoiser for a single mono audio stream.
+/// A stateful denoiser for a single audio stream.
 ///
 /// Each session owns its own RNNoise state and resamplers, so multiple
 /// sessions can run concurrently (e.g. one per microphone) and no state
@@ -51,32 +55,49 @@ class DenoiseResult {
 /// micStream.transform(session.transformer).listen(play);
 /// ```
 class NoiselessSession {
-  NoiselessSession._(this._session, this.sampleRate);
+  NoiselessSession._(this._session, this.sampleRate, this.channels);
 
   final rust.DenoiseSession _session;
 
   /// Sample rate of the PCM audio this session consumes and produces.
   final int sampleRate;
 
+  /// Number of interleaved channels this session consumes and produces.
+  final int channels;
+
   /// Creates a new denoising session.
   ///
-  /// * [sampleRate] - sample rate of the raw 16-bit PCM mono audio passed to
+  /// * [sampleRate] - sample rate of the raw 16-bit PCM audio passed to
   ///   [process]. Output is returned at the same rate. Rates other than
   ///   48000Hz are resampled internally (adding a small latency).
   /// * [wet] - dry/wet mix: 1.0 (default) is fully denoised, 0.0 passes the
   ///   audio through untouched. Lower it for less aggressive suppression.
+  /// * [channels] - number of interleaved channels in the PCM data (1 to 8).
+  ///   Each channel is denoised independently.
+  /// * [model] - optional custom RNNoise model in the nnnoiseless training
+  ///   format. By default the built-in general-purpose model is used.
   static Future<NoiselessSession> create({
     int sampleRate = 48000,
     double wet = 1.0,
+    int channels = 1,
+    Uint8List? model,
   }) async {
     await _ensureInitialized();
     return NoiselessSession._(
-      rust.DenoiseSession.create(sampleRate: sampleRate, wet: wet),
+      await rust.DenoiseSession.create(
+        sampleRate: sampleRate,
+        wet: wet,
+        channels: channels,
+        model: model,
+      ),
       sampleRate,
+      channels,
     );
   }
 
-  /// Denoises the next chunk of raw 16-bit PCM mono audio.
+  /// Denoises the next chunk of raw 16-bit PCM audio (interleaved if the
+  /// session has more than one channel). Chunks may be split at any byte
+  /// boundary; the session re-aligns samples and channels internally.
   Future<DenoiseResult> process(Uint8List input) async {
     final output = await _session.process(input: input);
     return DenoiseResult._(output.audio, output.voiceProbabilities);
@@ -115,6 +136,45 @@ class NoiselessSession {
       StreamTransformer.fromBind(bind);
 }
 
+/// A handle for cancelling a running [Noiseless.denoiseFile] call.
+///
+/// Tokens are one-shot: once cancelled, a token stays cancelled forever, and
+/// passing it to a new [Noiseless.denoiseFile] call fails immediately with a
+/// [DenoiseCancelledException]. Create a fresh token per operation.
+class NoiselessCancelToken {
+  // The native token is created lazily inside denoiseFile, after the Rust
+  // library is initialized, so constructing a token is always safe even as
+  // the very first use of the plugin.
+  rust.CancelToken? _inner;
+  bool _cancelled = false;
+
+  /// Requests cancellation. The running [Noiseless.denoiseFile] call throws
+  /// a [DenoiseCancelledException] shortly after.
+  void cancel() {
+    _cancelled = true;
+    _inner?.cancel();
+  }
+
+  /// Whether [cancel] has been called.
+  bool get isCancelled => _cancelled;
+
+  /// Creates or returns the native token. Only valid after RustLib init.
+  rust.CancelToken _materialize() {
+    final inner = _inner ??= rust.CancelToken.create();
+    if (_cancelled) {
+      inner.cancel();
+    }
+    return inner;
+  }
+}
+
+/// Thrown by [Noiseless.denoiseFile] when the operation was cancelled via a
+/// [NoiselessCancelToken].
+class DenoiseCancelledException implements Exception {
+  @override
+  String toString() => 'DenoiseCancelledException: file denoising cancelled';
+}
+
 /// A Dart interface for the nnnoiseless Rust library.
 ///
 /// Provides high-level methods for denoising audio files and real-time
@@ -129,9 +189,15 @@ abstract class Noiseless {
   /// and saves the cleaned audio to [outputPathStr]. Supports 16/24/32-bit
   /// int and 32-bit float WAV input at any sample rate; the output is
   /// written as 16-bit WAV at the input's sample rate.
+  ///
+  /// [onProgress] is invoked with a fraction from 0.0 to 1.0 as the file is
+  /// processed. Pass a [NoiselessCancelToken] as [cancelToken] to be able to
+  /// abort the operation; cancellation throws a [DenoiseCancelledException].
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
+    void Function(double progress)? onProgress,
+    NoiselessCancelToken? cancelToken,
   });
 
   /// Denoises a single chunk of raw audio data.
@@ -167,12 +233,44 @@ class _NoiselessImpl extends Noiseless {
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
+    void Function(double progress)? onProgress,
+    NoiselessCancelToken? cancelToken,
   }) async {
     await _ensureInitialized();
-    return rust.denoise(
+    if (onProgress == null && cancelToken == null) {
+      return rust.denoise(
+        inputPathStr: inputPathStr,
+        outputPathStr: outputPathStr,
+      );
+    }
+    final token = cancelToken ?? NoiselessCancelToken();
+    if (token.isCancelled) {
+      // Tokens are one-shot; fail deterministically instead of starting
+      // native work that would abort on its first cancellation check.
+      throw DenoiseCancelledException();
+    }
+    final progress = rust.denoiseFileWithProgress(
       inputPathStr: inputPathStr,
       outputPathStr: outputPathStr,
+      cancelToken: token._materialize(),
     );
+    try {
+      await for (final fraction in progress) {
+        onProgress?.call(fraction);
+      }
+    } on AnyhowException {
+      // The token's own state decides whether this was a cancellation; the
+      // message is not reliable (a file path may contain "cancelled").
+      if (token.isCancelled) {
+        throw DenoiseCancelledException();
+      }
+      rethrow;
+    } catch (_) {
+      // The error came from onProgress itself; stop the native work before
+      // propagating so it doesn't keep running (and writing) unobserved.
+      token.cancel();
+      rethrow;
+    }
   }
 
   @override

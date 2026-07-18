@@ -1,3 +1,35 @@
+## 1.2.0
+
+- **Multi-channel sessions**: `NoiselessSession.create(channels: n)` denoises
+  interleaved PCM with up to 8 channels, each with independent RNNoise state;
+  channel alignment survives arbitrary chunk sizes
+- **Custom RNNoise models**: pass `model:` bytes in the nnnoiseless training
+  format to `NoiselessSession.create` to use your own trained weights
+- **File progress and cancellation**: `denoiseFile` accepts `onProgress`
+  (fraction 0.0 to 1.0) and `cancelToken` (throws
+  `DenoiseCancelledException` on cancel)
+- Precompiled binaries now include Linux ARM64
+  (`aarch64-unknown-linux-gnu`)
+- CI now builds the example app for Linux desktop
+- Hardening from an adversarial review pass:
+  - sessions survive chunks split at odd byte offsets (a one-byte carry
+    keeps 16-bit sample pairs and channel alignment intact)
+  - `NoiselessCancelToken` can safely be constructed before any other
+    plugin call (the native token is created lazily); tokens are one-shot
+    and documented as such
+  - cancellation is detected from the token state, never by matching the
+    error message
+  - `denoiseFile` reports progress and honors cancellation during the
+    resample and write phases too, cleans up a partially-written output
+    file on cancel, no longer panics on WAVs whose sample count is not a
+    multiple of the channel count, and surfaces Rust panics as errors
+    instead of silent success
+  - a throwing `onProgress` callback now cancels the native work
+  - whole-file denoising runs on a dedicated thread so it cannot starve
+    real-time sessions; session creation moved off the UI thread
+- Note for implementers extending `Noiseless`: `denoiseFile` gained two
+  optional named parameters, so overrides must be updated to match
+
 ## 1.1.0
 
 - **New `NoiselessSession` API** for real-time denoising: instance-based (run

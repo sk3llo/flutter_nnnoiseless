@@ -6,7 +6,7 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `denoise_frames`, `resample_in`, `resample_out`, `to_pcm16`
+// These functions are ignored because they are not marked as `pub`: `denoise_frames`, `interleave_to_pcm16`, `make_denoiser`, `resample_in`, `resample_out`
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<DenoiseSession>>
 abstract class DenoiseSession implements RustOpaqueInterface {
@@ -15,12 +15,23 @@ abstract class DenoiseSession implements RustOpaqueInterface {
   /// * `sample_rate` - sample rate of the PCM data passed to [process].
   ///   Output audio is returned at the same rate.
   /// * `wet` - dry/wet mix: 1.0 = fully denoised, 0.0 = passthrough.
-  static DenoiseSession create({
+  /// * `channels` - number of interleaved channels in the PCM data. Each
+  ///   channel is denoised independently.
+  /// * `model` - optional custom RNNoise model in the nnnoiseless training
+  ///   format; `None` uses the built-in general-purpose model.
+  ///
+  /// Deliberately not `#[frb(sync)]`: model parsing and per-channel state
+  /// construction should run on the worker pool, not the UI thread.
+  static Future<DenoiseSession> create({
     required int sampleRate,
     required double wet,
+    required int channels,
+    Uint8List? model,
   }) => RustLib.instance.api.crateApiSessionDenoiseSessionCreate(
     sampleRate: sampleRate,
     wet: wet,
+    channels: channels,
+    model: model,
   );
 
   /// Drains any internally buffered audio, padding with silence as needed.
@@ -28,7 +39,8 @@ abstract class DenoiseSession implements RustOpaqueInterface {
   /// Call once at the end of a stream to receive the tail of the audio.
   Future<Uint8List> flush();
 
-  /// Denoises a chunk of raw 16-bit PCM mono audio.
+  /// Denoises a chunk of raw 16-bit PCM audio (interleaved if the session
+  /// has more than one channel).
   ///
   /// Designed to be called repeatedly with consecutive chunks (e.g. from a
   /// microphone stream). Samples are buffered internally, so the returned
@@ -42,7 +54,8 @@ abstract class DenoiseSession implements RustOpaqueInterface {
 
 /// The result of processing one chunk of audio through a [DenoiseSession].
 class DenoiseOutput {
-  /// Denoised 16-bit PCM mono audio at the session's sample rate.
+  /// Denoised 16-bit PCM audio at the session's sample rate, interleaved
+  /// with the session's channel count.
   ///
   /// May be empty (or shorter/longer than the input) while the session
   /// buffers samples towards full 10ms frames; timing evens out across
@@ -50,7 +63,8 @@ class DenoiseOutput {
   final Uint8List audio;
 
   /// Voice activity probability (0.0..=1.0) for each 10ms frame that was
-  /// processed during this call, in order.
+  /// processed during this call, in order. For multi-channel sessions this
+  /// is the maximum across channels for that frame.
   final Float32List voiceProbabilities;
 
   const DenoiseOutput({required this.audio, required this.voiceProbabilities});

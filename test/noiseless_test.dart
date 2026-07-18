@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_nnnoiseless/flutter_nnnoiseless.dart';
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
+import 'package:flutter_rust_bridge/flutter_rust_bridge.dart'
+    show AnyhowException;
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
     show ExternalLibrary;
 import 'package:flutter_test/flutter_test.dart';
@@ -161,6 +163,276 @@ void main() {
       final total = output.fold<int>(0, (sum, c) => sum + c.length);
       expect(total, input.length);
       session.dispose();
+    });
+  }, skip: !dylib.existsSync() ? 'Rust dylib not built' : false);
+
+  group('multi-channel and custom models', () {
+    test('stereo session denoises both channels across odd chunk sizes',
+        () async {
+      final session = await NoiselessSession.create(channels: 2);
+
+      // Interleave a tone (left) with noise (right).
+      final left = _noisySine(48000).buffer.asInt16List();
+      final rng = Random(3);
+      final interleaved = Int16List(left.length * 2);
+      for (var i = 0; i < left.length; i++) {
+        interleaved[2 * i] = left[i];
+        interleaved[2 * i + 1] = ((rng.nextDouble() * 2 - 1) * 3000).toInt();
+      }
+      final bytes = interleaved.buffer.asUint8List();
+
+      // Feed in 1002-byte chunks: 501 samples, deliberately not a multiple
+      // of the channel count, to exercise the alignment carry.
+      final outputs = <Uint8List>[];
+      var totalVadFrames = 0;
+      for (var i = 0; i < bytes.length; i += 1002) {
+        final chunk = Uint8List.sublistView(
+            bytes, i, (i + 1002).clamp(0, bytes.length));
+        final result = await session.process(chunk);
+        outputs.add(result.audio);
+        totalVadFrames += result.voiceProbabilities.length;
+      }
+
+      final total = outputs.fold<int>(0, (sum, c) => sum + c.length);
+      expect(total, bytes.length);
+      // 1 second of 48kHz audio = 100 frames of 10ms, one VAD per frame.
+      expect(totalVadFrames, 100);
+
+      // Both channels must contain signal.
+      final out = Uint8List(total);
+      var offset = 0;
+      for (final chunk in outputs) {
+        out.setRange(offset, offset + chunk.length, chunk);
+        offset += chunk.length;
+      }
+      final samples = out.buffer.asInt16List();
+      var leftEnergy = 0.0, rightEnergy = 0.0;
+      for (var i = 960; i + 1 < samples.length; i += 2) {
+        leftEnergy += samples[i].abs();
+        rightEnergy += samples[i + 1].abs();
+      }
+      expect(leftEnergy, greaterThan(0));
+      expect(rightEnergy, greaterThan(0));
+      // The tone channel should retain far more energy than the noise one.
+      expect(leftEnergy, greaterThan(rightEnergy));
+      session.dispose();
+    });
+
+    test('output is identical no matter how the byte stream is chunked',
+        () async {
+      final input = _noisySine(48000);
+
+      final reference = await NoiselessSession.create();
+      final whole = await reference.process(input);
+      final wholeTail = await reference.flush();
+      reference.dispose();
+      expect(wholeTail, isEmpty);
+
+      // Split at deliberately hostile offsets, including odd byte counts,
+      // as a transport (socket, platform channel) might.
+      final chunked = await NoiselessSession.create();
+      final collected = BytesBuilder();
+      const sizes = [999, 1, 4801, 3, 7777, 2, 501];
+      var offset = 0, s = 0;
+      while (offset < input.length) {
+        final take = sizes[s++ % sizes.length]
+            .clamp(0, input.length - offset);
+        final result = await chunked.process(
+            Uint8List.sublistView(input, offset, offset + take));
+        collected.add(result.audio);
+        offset += take;
+      }
+      collected.add(await chunked.flush());
+      chunked.dispose();
+
+      expect(collected.toBytes(), equals(whole.audio),
+          reason: 'byte-level chunk splits must not corrupt the stream');
+    });
+
+    test('stereo wet=0.0 passes both channels through (after warm-up)',
+        () async {
+      final session =
+          await NoiselessSession.create(channels: 2, wet: 0.0);
+      final left = _noisySine(48000).buffer.asInt16List();
+      final interleaved = Int16List(left.length * 2);
+      for (var i = 0; i < left.length; i++) {
+        interleaved[2 * i] = left[i];
+        interleaved[2 * i + 1] = -left[i];
+      }
+      final input = interleaved.buffer.asUint8List();
+      final result = await session.process(input);
+
+      final inSamples = interleaved;
+      final outSamples = result.audio.buffer.asInt16List();
+      // Skip the silenced warm-up frame: 480 samples * 2 channels.
+      for (var i = 960; i < 9600; i++) {
+        expect((outSamples[i] - inSamples[i]).abs(), lessThanOrEqualTo(1),
+            reason: 'sample $i should pass through at wet=0.0');
+      }
+      session.dispose();
+    });
+
+    test('create rejects invalid model bytes', () async {
+      expect(
+        () => NoiselessSession.create(
+            model: Uint8List.fromList(List.filled(64, 42))),
+        throwsA(anything),
+      );
+    });
+
+    test('create rejects invalid channel counts', () async {
+      expect(() => NoiselessSession.create(channels: 0), throwsA(anything));
+      expect(() => NoiselessSession.create(channels: 9), throwsA(anything));
+    });
+
+    test('accepts a custom model in nnnoiseless format', () async {
+      // The nnnoiseless crate ships its built-in weights in exactly the
+      // format from_bytes expects; use them as a known-good fixture.
+      final registry =
+          Directory('${Platform.environment['HOME']}/.cargo/registry/src');
+      File? weightsFile;
+      if (registry.existsSync()) {
+        for (final index in registry.listSync().whereType<Directory>()) {
+          final candidate =
+              File('${index.path}/nnnoiseless-0.5.1/src/weights.rnn');
+          if (candidate.existsSync()) {
+            weightsFile = candidate;
+            break;
+          }
+        }
+      }
+      if (weightsFile == null) {
+        markTestSkipped('nnnoiseless sources not in cargo registry');
+        return;
+      }
+      final weights = await weightsFile.readAsBytes();
+
+      final session = await NoiselessSession.create(model: weights);
+      final result = await session.process(_noisySine(48000));
+      expect(result.audio.length, 48000 * 2);
+      expect(result.voiceProbabilities.length, 100);
+
+      // reset() must rebuild denoisers from the same custom model.
+      await session.reset();
+      final again = await session.process(_noisySine(48000));
+      expect(again.audio.length, 48000 * 2);
+      expect(again.audio, equals(result.audio),
+          reason: 'reset must fully restore initial custom-model state');
+      session.dispose();
+    });
+  }, skip: !dylib.existsSync() ? 'Rust dylib not built' : false);
+
+  group('file progress and cancellation', () {
+    test('denoiseFile reports monotonic progress ending at 1.0', () async {
+      final dir = await Directory.systemTemp.createTemp('nnnoiseless_test');
+      final inputPath = '${dir.path}/input.wav';
+      final outputPath = '${dir.path}/output.wav';
+
+      final pcm = _noisySine(48000).buffer.asInt16List();
+      final channel = Float64List.fromList(
+        pcm.map((s) => s / 32767.0).toList(),
+      );
+      await Wav([channel], 48000).writeFile(inputPath);
+
+      final progress = <double>[];
+      await Noiseless.instance.denoiseFile(
+        inputPathStr: inputPath,
+        outputPathStr: outputPath,
+        onProgress: progress.add,
+      );
+
+      expect(progress, isNotEmpty);
+      expect(progress.last, 1.0);
+      for (var i = 1; i < progress.length; i++) {
+        expect(progress[i], greaterThanOrEqualTo(progress[i - 1]));
+      }
+      expect(File(outputPath).existsSync(), isTrue);
+
+      await dir.delete(recursive: true);
+    });
+
+    test('cancelToken aborts denoiseFile with DenoiseCancelledException',
+        () async {
+      final dir = await Directory.systemTemp.createTemp('nnnoiseless_test');
+      final inputPath = '${dir.path}/input.wav';
+      final outputPath = '${dir.path}/output.wav';
+
+      // 30 seconds of audio so there is time to cancel mid-flight.
+      final pcm = <double>[];
+      for (var s = 0; s < 30; s++) {
+        pcm.addAll(
+            _noisySine(48000).buffer.asInt16List().map((v) => v / 32767.0));
+      }
+      await Wav([Float64List.fromList(pcm)], 48000).writeFile(inputPath);
+
+      final token = NoiselessCancelToken();
+      expect(token.isCancelled, isFalse);
+
+      await expectLater(
+        Noiseless.instance.denoiseFile(
+          inputPathStr: inputPath,
+          outputPathStr: outputPath,
+          cancelToken: token,
+          onProgress: (fraction) {
+            if (fraction > 0.0) token.cancel();
+          },
+        ),
+        throwsA(isA<DenoiseCancelledException>()),
+      );
+      expect(token.isCancelled, isTrue);
+
+      await dir.delete(recursive: true);
+    });
+
+    test('an already-cancelled token fails immediately and deterministically',
+        () async {
+      final token = NoiselessCancelToken()..cancel();
+      await expectLater(
+        Noiseless.instance.denoiseFile(
+          inputPathStr: '/nonexistent/in.wav',
+          outputPathStr: '/nonexistent/out.wav',
+          cancelToken: token,
+        ),
+        throwsA(isA<DenoiseCancelledException>()),
+      );
+    });
+
+    test('real errors are not misreported as cancellation even when the '
+        'path contains "cancelled"', () async {
+      await expectLater(
+        Noiseless.instance.denoiseFile(
+          inputPathStr: '/nonexistent/cancelled_take.wav',
+          outputPathStr: '/nonexistent/out.wav',
+          onProgress: (_) {},
+        ),
+        throwsA(isA<AnyhowException>()),
+      );
+    });
+
+    test('an error thrown by onProgress cancels the native work', () async {
+      final dir = await Directory.systemTemp.createTemp('nnnoiseless_test');
+      final inputPath = '${dir.path}/input.wav';
+      final outputPath = '${dir.path}/output.wav';
+      final pcm = _noisySine(48000).buffer.asInt16List();
+      await Wav(
+        [Float64List.fromList(pcm.map((s) => s / 32767.0).toList())],
+        48000,
+      ).writeFile(inputPath);
+
+      final token = NoiselessCancelToken();
+      await expectLater(
+        Noiseless.instance.denoiseFile(
+          inputPathStr: inputPath,
+          outputPathStr: outputPath,
+          cancelToken: token,
+          onProgress: (_) => throw StateError('listener died'),
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(token.isCancelled, isTrue,
+          reason: 'the wrapper must stop the native work');
+
+      await dir.delete(recursive: true);
     });
   }, skip: !dylib.existsSync() ? 'Rust dylib not built' : false);
 

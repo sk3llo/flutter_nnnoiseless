@@ -44,3 +44,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local session history, lockfiles, and build output that must never be
+# committed or published (pub includes untracked non-ignored files).
+.recall/
+pubspec.lock
+Podfile.lock
+**/build/
+rust/target/

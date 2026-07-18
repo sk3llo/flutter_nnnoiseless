@@ -2,11 +2,46 @@ use anyhow::{Context, Result};
 use dasp::interpolate::sinc::Sinc;
 use dasp::ring_buffer::Fixed;
 use dasp::{signal, Signal};
+use flutter_rust_bridge::frb;
 use hound::{WavReader, WavSpec, WavWriter};
 use nnnoiseless::{DenoiseState, RnnModel};
 use once_cell::sync::Lazy;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use crate::frb_generated::StreamSink;
+
+/// A handle for cancelling a long-running file denoise from another call.
+///
+/// Cancellation is cooperative: the denoiser checks the token between frames
+/// and aborts with an error containing "cancelled" when it is set.
+#[frb(opaque)]
+pub struct CancelToken {
+    flag: Arc<AtomicBool>,
+}
+
+impl CancelToken {
+    /// Creates a new, un-cancelled token.
+    #[frb(sync)]
+    pub fn create() -> CancelToken {
+        CancelToken {
+            flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Requests cancellation of the operation holding this token.
+    #[frb(sync)]
+    pub fn cancel(&self) {
+        self.flag.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether [cancel] has been called.
+    #[frb(sync)]
+    pub fn is_cancelled(&self) -> bool {
+        self.flag.load(Ordering::SeqCst)
+    }
+}
 
 /// The fixed frame size required by the nnnoiseless model.
 const FRAME_SIZE: usize = DenoiseState::FRAME_SIZE;
@@ -121,8 +156,55 @@ fn read_samples_interleaved(reader: &mut WavReader<std::io::BufReader<std::fs::F
     }
 }
 
-// The file-based denoising function.
-fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
+/// Resamples each channel, checking for cancellation periodically and
+/// reporting per-channel progress mapped into `progress_range`.
+fn resample_channels(
+    channels: Vec<Vec<f32>>,
+    from_hz: f64,
+    to_hz: f64,
+    cancel: Option<&AtomicBool>,
+    progress_range: (f64, f64),
+    report: &mut dyn FnMut(f64),
+) -> Result<Vec<Vec<f32>>> {
+    let total = channels.len().max(1) as f64;
+    let mut out_channels = Vec::with_capacity(channels.len());
+    for (ch, channel_data) in channels.into_iter().enumerate() {
+        let signal = signal::from_iter(channel_data);
+        let sinc = Sinc::new(Fixed::from([0.0; 256]));
+        let resampler = signal.from_hz_to_hz(sinc, from_hz, to_hz);
+        let mut out = Vec::new();
+        for (i, sample) in resampler.until_exhausted().enumerate() {
+            if i % 48_000 == 0 && cancel.is_some_and(|c| c.load(Ordering::SeqCst)) {
+                anyhow::bail!("Denoising cancelled");
+            }
+            out.push(sample);
+        }
+        let span = progress_range.1 - progress_range.0;
+        report(progress_range.0 + span * (ch as f64 + 1.0) / total);
+        out_channels.push(out);
+    }
+    Ok(out_channels)
+}
+
+// The file-based denoising function. Progress is reported as a fraction in
+// 0.0..=1.0 across all phases (resample in: 0-0.10, denoise: 0.10-0.85,
+// resample out: 0.85-0.95, write: 0.95-1.0); cancellation is checked
+// periodically in every phase.
+fn denoise_wav(
+    input_path: &Path,
+    output_path: &Path,
+    mut on_progress: impl FnMut(f64),
+    cancel: Option<&AtomicBool>,
+) -> Result<()> {
+    let cancelled = || cancel.is_some_and(|c| c.load(Ordering::SeqCst));
+    let mut last_reported = -1.0f64;
+    let mut report = |fraction: f64| {
+        if fraction - last_reported >= 0.01 || fraction >= 1.0 {
+            on_progress(fraction);
+            last_reported = fraction;
+        }
+    };
+
     let mut reader = WavReader::open(input_path)
         .with_context(|| format!("Failed to open input file: {:?}", input_path))?;
     let spec = reader.spec();
@@ -141,18 +223,23 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
     for (i, sample) in input_samples_interleaved.iter().enumerate() {
         channel_buffers[i % num_channels].push(*sample);
     }
+    // A truncated interleaved file can leave earlier channels one sample
+    // longer than later ones; trim so all channels have equal length instead
+    // of indexing out of range on the final frame.
+    let min_len = channel_buffers.iter().map(|c| c.len()).min().unwrap_or(0);
+    for buffer in &mut channel_buffers {
+        buffer.truncate(min_len);
+    }
 
     let resampled_channels = if spec.sample_rate != TARGET_SAMPLE_RATE {
-        channel_buffers
-            .into_iter()
-            .map(|channel_data| {
-                let signal = signal::from_iter(channel_data);
-                let sinc = Sinc::new(Fixed::from([0.0; 256]));
-                let resampler =
-                    signal.from_hz_to_hz(sinc, spec.sample_rate as f64, TARGET_SAMPLE_RATE as f64);
-                resampler.until_exhausted().collect::<Vec<f32>>()
-            })
-            .collect()
+        resample_channels(
+            channel_buffers,
+            spec.sample_rate as f64,
+            TARGET_SAMPLE_RATE as f64,
+            cancel,
+            (0.0, 0.10),
+            &mut report,
+        )?
     } else {
         channel_buffers
     };
@@ -167,6 +254,10 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
         vec![Vec::with_capacity(num_samples_per_channel); num_channels];
 
     for frame_start in (0..num_samples_per_channel).step_by(FRAME_SIZE) {
+        if cancelled() {
+            anyhow::bail!("Denoising cancelled");
+        }
+        report(0.10 + 0.75 * frame_start as f64 / num_samples_per_channel.max(1) as f64);
         for ch in 0..num_channels {
             let frame_end = (frame_start + FRAME_SIZE).min(num_samples_per_channel);
             let input_slice = &resampled_channels[ch][frame_start..frame_end];
@@ -184,16 +275,14 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
 
     // Resample back to the original rate so the output file matches the input.
     let cleaned_channels: Vec<Vec<f32>> = if spec.sample_rate != TARGET_SAMPLE_RATE {
-        cleaned_channels
-            .into_iter()
-            .map(|channel_data| {
-                let signal = signal::from_iter(channel_data);
-                let sinc = Sinc::new(Fixed::from([0.0; 256]));
-                let resampler =
-                    signal.from_hz_to_hz(sinc, TARGET_SAMPLE_RATE as f64, spec.sample_rate as f64);
-                resampler.until_exhausted().collect::<Vec<f32>>()
-            })
-            .collect()
+        resample_channels(
+            cleaned_channels,
+            TARGET_SAMPLE_RATE as f64,
+            spec.sample_rate as f64,
+            cancel,
+            (0.85, 0.95),
+            &mut report,
+        )?
     } else {
         cleaned_channels
     };
@@ -212,19 +301,81 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
         sample_format: hound::SampleFormat::Int,
     };
     let mut writer = WavWriter::create(output_path, output_spec)?;
-    for sample in output_samples_interleaved {
+    let mut write_error: Option<anyhow::Error> = None;
+    for (i, sample) in output_samples_interleaved.into_iter().enumerate() {
+        if i % 480_000 == 0 && cancelled() {
+            write_error = Some(anyhow::anyhow!("Denoising cancelled"));
+            break;
+        }
         let clipped_sample = sample.max(i16::MIN as f32).min(i16::MAX as f32);
-        writer.write_sample(clipped_sample as i16)?;
+        if let Err(e) = writer.write_sample(clipped_sample as i16) {
+            write_error = Some(e.into());
+            break;
+        }
+    }
+    if let Some(error) = write_error {
+        // Don't leave a partially-written file behind.
+        drop(writer);
+        let _ = std::fs::remove_file(output_path);
+        return Err(error);
     }
     writer.finalize()?;
+    report(1.0);
 
     Ok(())
 }
-
 
 // Wrapper function for file-based denoising.
 pub fn denoise(input_path_str: &String, output_path_str: &String) -> Result<()> {
     let input_path = Path::new(input_path_str);
     let output_path = Path::new(output_path_str);
-    denoise_wav(input_path, output_path)
+    denoise_wav(input_path, output_path, |_| {}, None)
+}
+
+/// Denoises an audio file while streaming progress (0.0..=1.0) to Dart.
+///
+/// The stream closes when denoising completes. Failures (including
+/// cancellation via `cancel_token`, whose error contains "cancelled") are
+/// delivered as an error event on the stream, since the function itself is
+/// fire-and-forget on the Dart side. Progress events are best-effort: a
+/// dropped stream listener does not abort the work.
+///
+/// The work runs on a dedicated thread so a long file denoise never occupies
+/// a worker of the shared FFI thread pool (which real-time sessions need),
+/// and panics are caught and surfaced as stream errors instead of silently
+/// closing the stream as if the file had been written.
+pub fn denoise_file_with_progress(
+    input_path_str: String,
+    output_path_str: String,
+    cancel_token: &CancelToken,
+    progress_sink: StreamSink<f64>,
+) {
+    let flag = cancel_token.flag.clone();
+    std::thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            denoise_wav(
+                Path::new(&input_path_str),
+                Path::new(&output_path_str),
+                |fraction| {
+                    let _ = progress_sink.add(fraction);
+                },
+                Some(&flag),
+            )
+        }));
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                let _ = progress_sink.add_error(error);
+            }
+            Err(panic) => {
+                let message = panic
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown panic".to_string());
+                let _ =
+                    progress_sink.add_error(anyhow::anyhow!("Denoising panicked: {message}"));
+            }
+        }
+    });
 }

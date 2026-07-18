@@ -32,7 +32,7 @@ _Real-time and batch audio noise reduction for Flutter. A port of the [nnnoisele
 | iOS      | ✅        | 11.0            |
 | macOS    | ✅        | 10.15           |
 | Windows  | ✅        | Windows 10      |
-| Linux    | In progress | -             |
+| Linux    | ✅        | Ubuntu 20.04+ (x64, arm64) |
 
 Requires Flutter 3.0.0 or higher.
 

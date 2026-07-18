@@ -4,12 +4,13 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_nnnoiseless'
-  s.version          = '0.0.1'
-  s.summary          = 'A new Flutter FFI plugin project.'
+  s.version          = '1.0.2'
+  s.summary          = 'Real-time and batch audio noise reduction for Flutter.'
   s.description      = <<-DESC
-A new Flutter FFI plugin project.
+Real-time and batch audio noise reduction for Flutter. A port of the
+nnnoiseless Rust crate (RNNoise), powered by Flutter Rust Bridge.
                        DESC
-  s.homepage         = 'https://www,antonkarpenko.com'
+  s.homepage         = 'https://github.com/sk3llo/flutter_nnnoiseless'
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Anton Karpenko' => 'kapraton@gmail.com' }
 
@@ -21,7 +22,7 @@ A new Flutter FFI plugin project.
   s.source_files     = 'Classes/**/*'
   s.dependency 'FlutterMacOS'
 
-  s.platform = :osx, '10.11'
+  s.platform = :osx, '10.15'
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES' }
   s.swift_version = '5.0'
 

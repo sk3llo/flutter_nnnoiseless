@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart';
+import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart' as rust;
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
 import 'package:wav/wav_file.dart';
 
@@ -45,12 +45,9 @@ abstract class Noiseless {
 
 /// The concrete implementation of the [Noiseless] interface.
 class _NoiselessImpl extends Noiseless {
-  bool _initialized = false;
-
   /// Initializes the underlying Rust library if it hasn't been already.
-  Future<void> init() async {
+  Future<void> _ensureInitialized() async {
     if (!RustLib.instance.initialized) {
-      _initialized = true;
       await RustLib.init();
     }
   }
@@ -60,8 +57,11 @@ class _NoiselessImpl extends Noiseless {
     required String inputPathStr,
     required String outputPathStr,
   }) async {
-    if (!_initialized) await init();
-    return denoise(inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+    await _ensureInitialized();
+    return rust.denoise(
+      inputPathStr: inputPathStr,
+      outputPathStr: outputPathStr,
+    );
   }
 
   @override
@@ -69,15 +69,8 @@ class _NoiselessImpl extends Noiseless {
     required Uint8List input,
     int inputSampleRate = 48000,
   }) async {
-    if (!_initialized) await init();
-    // Assuming the rust function is named `denoise_chunk` or similar.
-    // The original code had a recursive call here, which is likely an error.
-    // This should call the actual Rust binding.
-    // For example:
-    // return denoiseRealtime(input: input, inputSampleRate: inputSampleRate);
-    // Since the actual binding name isn't provided, I'll leave the original
-    // (likely incorrect) code but comment on the required change.
-    return await denoiseChunk(input: input, inputSampleRate: inputSampleRate);
+    await _ensureInitialized();
+    return rust.denoiseChunk(input: input, inputSampleRate: inputSampleRate);
   }
 
   @override

@@ -6,12 +6,29 @@ import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart' as rust;
 import 'package:flutter_nnnoiseless/src/rust/api/session.dart' as rust;
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge.dart'
-    show AnyhowException;
+    show AnyhowException, loadExternalLibrary;
+import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart'
+    show ExternalLibraryLoaderConfig;
 import 'package:wav/wav_file.dart';
 
 /// Initializes the underlying Rust library if it hasn't been already.
+///
+/// On web the Rust library is WebAssembly, bundled with this package and
+/// served from the app's assets; everywhere else the platform build systems
+/// provide the native library and the default loader finds it.
 Future<void> _ensureInitialized() async {
-  if (!RustLib.instance.initialized) {
+  if (RustLib.instance.initialized) return;
+  if (kIsWeb) {
+    await RustLib.init(
+      externalLibrary: await loadExternalLibrary(
+        const ExternalLibraryLoaderConfig(
+          stem: 'rust_lib_flutter_nnnoiseless',
+          ioDirectory: 'rust/target/release/',
+          webPrefix: 'assets/packages/flutter_nnnoiseless/web/pkg/',
+        ),
+      ),
+    );
+  } else {
     await RustLib.init();
   }
 }
@@ -244,6 +261,12 @@ class _NoiselessImpl extends Noiseless {
     double wet = 1.0,
     Uint8List? model,
   }) async {
+    if (kIsWeb) {
+      throw UnsupportedError(
+        'denoiseFile is not supported on web (browsers have no file paths); '
+        'use NoiselessSession to denoise audio buffers instead.',
+      );
+    }
     await _ensureInitialized();
     if (onProgress == null && cancelToken == null && wet == 1.0 && model == null) {
       return rust.denoise(
@@ -299,6 +322,12 @@ class _NoiselessImpl extends Noiseless {
     int sampleRate = 48000,
     int numChannels = 1,
   }) async {
+    if (kIsWeb) {
+      throw UnsupportedError(
+        'pcmToWav is not supported on web (browsers have no file paths); '
+        'package:wav\'s Wav.write can produce WAV bytes for download.',
+      );
+    }
     // Convert the raw byte data (Uint8List) into a list of 16-bit integers.
     // ByteData.view provides a way to read multi-byte values from a byte buffer.
     final pcm16 = pcmData.buffer.asInt16List();

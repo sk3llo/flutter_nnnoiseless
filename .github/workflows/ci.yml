@@ -53,3 +53,25 @@ jobs:
         run: |
           flutter pub get
           flutter build linux --release
+
+  build-web-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install nightly Rust with wasm support
+        run: |
+          rustup toolchain install nightly --profile minimal --component rust-src --target wasm32-unknown-unknown
+
+      - name: Build wasm bundle
+        run: ./scripts/build_web.sh
+
+      - name: Build example for web
+        working-directory: example
+        run: |
+          flutter pub get
+          flutter build web --release

@@ -1,5 +1,5 @@
 PODS:
-  - flutter_nnnoiseless (1.2.0):
+  - flutter_nnnoiseless (1.4.0):
     - FlutterMacOS
   - FlutterMacOS (1.0.0)
   - record_macos (1.2.1):
@@ -19,7 +19,7 @@ EXTERNAL SOURCES:
     :path: Flutter/ephemeral/.symlinks/plugins/record_macos/macos
 
 SPEC CHECKSUMS:
-  flutter_nnnoiseless: dcb7e6df4a4445f06289fe1ef7d8ffcb188ca0fd
+  flutter_nnnoiseless: 52923232e1598be5bf63cdfd1b95684b68730e45
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   record_macos: 5d55909f9650314be6424ffd6b123ac75a08c3c1
 

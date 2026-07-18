@@ -1,3 +1,13 @@
+## 1.4.0
+
+- **Web support**: `NoiselessSession` (real-time denoising and VAD) now
+  runs in the browser via bundled WebAssembly; no extra build steps, but
+  apps must be served with cross-origin isolation headers (see the README
+  Web section). `denoiseFile` and `pcmToWav` throw `UnsupportedError` on
+  web. Adds ~760KB of wasm assets to app bundles.
+- Example app runs on web (self-test and live microphone VAD demos)
+- Dropped the unused `rand` dependency; upgraded `wasm-bindgen` to 0.2.126
+
 ## 1.3.0
 
 - **Denoise any audio file**: `denoiseFile` now decodes FLAC, MP3,

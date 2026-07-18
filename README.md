@@ -22,6 +22,7 @@ _Real-time and batch audio noise reduction for Flutter. A port of the [nnnoisele
 - Custom RNNoise models trained on your own noise profiles
 - Built-in streaming resampling: feed any sample rate, get the same rate back
 - Adjustable suppression strength via a dry/wet mix parameter
+- Runs everywhere Flutter does, including the browser (bundled WebAssembly)
 - No Rust toolchain required: prebuilt, signed native libraries are downloaded automatically at build time
 
 ## Supported platforms
@@ -33,6 +34,7 @@ _Real-time and batch audio noise reduction for Flutter. A port of the [nnnoisele
 | macOS    | ✅        | 10.15           |
 | Windows  | ✅        | Windows 10      |
 | Linux    | ✅        | Ubuntu 20.04+ (x64, arm64) |
+| Web      | ✅        | Browsers with SharedArrayBuffer (see [Web](#web)) |
 
 Requires Flutter 3.0.0 or higher.
 
@@ -125,6 +127,36 @@ await Noiseless.instance.pcmToWav(
   sampleRate: 48000,
 );
 ```
+
+## Web
+
+On web the Rust denoiser runs as WebAssembly, bundled with this package, so
+`NoiselessSession` works with no extra build steps. Two things to know:
+
+1. **Your app must be served with cross-origin isolation headers**, because
+   the denoiser runs in a Web Worker backed by shared memory:
+
+   ```
+   Cross-Origin-Opener-Policy: same-origin
+   Cross-Origin-Embedder-Policy: require-corp
+   ```
+
+   For local development:
+
+   ```shell
+   flutter run -d chrome \
+     --web-header=Cross-Origin-Opener-Policy=same-origin \
+     --web-header=Cross-Origin-Embedder-Policy=require-corp
+   ```
+
+   Hosts that cannot set response headers (e.g. GitHub Pages) can use the
+   [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker)
+   workaround.
+
+2. **File-based APIs are not available**: `denoiseFile` and `pcmToWav`
+   throw `UnsupportedError` on web since browsers have no file paths. Use
+   sessions to denoise audio buffers, and `package:wav`'s `Wav.write` if
+   you need WAV bytes for download.
 
 ## How it works
 

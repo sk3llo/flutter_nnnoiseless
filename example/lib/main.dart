@@ -1,12 +1,15 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_nnnoiseless/flutter_nnnoiseless.dart';
 import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+
+import 'capture_web.dart' if (dart.library.io) 'capture_io.dart' as capture;
 
 Future<void> main() async {
   runApp(const MyApp());
@@ -46,11 +49,14 @@ class _DemoPageState extends State<DemoPage> {
   double _voiceProbability = 0.0;
   String _micStatus = 'Streams the microphone through a NoiselessSession.';
 
+  // Self-test state.
+  String _selfTestStatus = 'Runs a synthetic session round-trip on-device.';
+
   @override
   void initState() {
     super.initState();
-    getTemporaryDirectory().then(
-      (dir) => setState(() => _tempDir = dir.path),
+    capture.tempDirPath().then(
+      (dir) => setState(() => _tempDir = dir ?? ''),
     );
   }
 
@@ -70,6 +76,27 @@ class _DemoPageState extends State<DemoPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Self-test',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(_selfTestStatus),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: _runSelfTest,
+                    child: const Text('Run self-test'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (!kIsWeb)
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -145,7 +172,7 @@ class _DemoPageState extends State<DemoPage> {
                     const SizedBox(height: 12),
                   ],
                   FilledButton(
-                    onPressed: _tempDir.isEmpty
+                    onPressed: !kIsWeb && _tempDir.isEmpty
                         ? null
                         : (recording ? _stopRecording : _startRecording),
                     child: Text(recording ? 'Stop' : 'Record and denoise'),
@@ -157,6 +184,36 @@ class _DemoPageState extends State<DemoPage> {
         ],
       ),
     );
+  }
+
+  /// Exercises the denoiser end-to-end without any files or microphone:
+  /// one second of a noisy 16kHz tone through a resampling session.
+  Future<void> _runSelfTest() async {
+    setState(() => _selfTestStatus = 'Self-test: running...');
+    try {
+      final session = await NoiselessSession.create(sampleRate: 16000);
+      final samples = Int16List(16000);
+      for (var i = 0; i < samples.length; i++) {
+        samples[i] = (10000 *
+                (0.8 * math.sin(2 * math.pi * 440 * i / 16000) +
+                    0.2 * ((i * 2654435761) % 1000 / 500 - 1)))
+            .round()
+            .clamp(-32768, 32767);
+      }
+      final result = await session.process(samples.buffer.asUint8List());
+      final tail = await session.flush();
+      session.dispose();
+
+      final totalBytes = result.audio.length + tail.length;
+      final frames = result.voiceProbabilities.length;
+      final ok = totalBytes > samples.lengthInBytes * 0.85 && frames > 90;
+      setState(() => _selfTestStatus = ok
+          ? 'Self-test: PASS ($totalBytes bytes out, $frames VAD frames, '
+              'max VAD ${(result.voiceProbability * 100).round()}%)'
+          : 'Self-test: FAIL ($totalBytes bytes out, $frames VAD frames)');
+    } catch (e) {
+      setState(() => _selfTestStatus = 'Self-test: FAIL ($e)');
+    }
   }
 
   Future<void> _denoiseFile() async {
@@ -171,7 +228,7 @@ class _DemoPageState extends State<DemoPage> {
       final byteData = await rootBundle.load('assets/sample.wav');
       final inputPath = path.join(_tempDir, 'sample.wav');
       final outputPath = path.join(_tempDir, 'output.wav');
-      await File(inputPath).writeAsBytes(byteData.buffer.asUint8List());
+      await capture.writeBytes(inputPath, byteData.buffer.asUint8List());
       await Noiseless.instance.denoiseFile(
         inputPathStr: inputPath,
         outputPathStr: outputPath,
@@ -202,8 +259,8 @@ class _DemoPageState extends State<DemoPage> {
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final rawPath = path.join(_tempDir, 'mic_raw_$stamp');
     final denoisedPath = path.join(_tempDir, 'mic_denoised_$stamp');
-    final rawSink = File(rawPath).openWrite();
-    final denoisedSink = File(denoisedPath).openWrite();
+    final rawSink = capture.AudioCapture(rawPath);
+    final denoisedSink = capture.AudioCapture(denoisedPath);
 
     /// One session per recording: it owns the denoiser state and reports a
     /// voice activity probability for every processed chunk.
@@ -218,7 +275,10 @@ class _DemoPageState extends State<DemoPage> {
 
     setState(() {
       _session = session;
-      _micStatus = 'Recording... raw and denoised WAVs are saved on stop.';
+      _micStatus = kIsWeb
+          ? 'Recording... live voice activity below (audio is not saved '
+              'on web).'
+          : 'Recording... raw and denoised WAVs are saved on stop.';
     });
 
     // Chunk processing is serialized through a future chain so that onDone
@@ -244,18 +304,22 @@ class _DemoPageState extends State<DemoPage> {
       await rawSink.close();
       await denoisedSink.close();
 
-      /// Convert both raw PCM captures to playable WAV files.
-      await Noiseless.instance.pcmToWav(
-        pcmData: await File(rawPath).readAsBytes(),
-        outputPath: rawPath,
-      );
-      await Noiseless.instance.pcmToWav(
-        pcmData: await File(denoisedPath).readAsBytes(),
-        outputPath: denoisedPath,
-      );
+      if (!kIsWeb) {
+        /// Convert both raw PCM captures to playable WAV files.
+        await Noiseless.instance.pcmToWav(
+          pcmData: await capture.readBytes(rawPath),
+          outputPath: rawPath,
+        );
+        await Noiseless.instance.pcmToWav(
+          pcmData: await capture.readBytes(denoisedPath),
+          outputPath: denoisedPath,
+        );
+      }
 
       if (mounted) {
-        setState(() => _micStatus = 'Saved $rawPath.wav and $denoisedPath.wav');
+        setState(() => _micStatus = kIsWeb
+            ? 'Recording finished.'
+            : 'Saved $rawPath.wav and $denoisedPath.wav');
       }
     });
   }
